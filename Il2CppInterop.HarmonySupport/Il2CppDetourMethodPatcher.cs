@@ -404,9 +404,8 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         if (needsBoxing)
         {
             var classPtr = Il2CppClassPointerStore.GetNativeClassPointer(managedParamType);
-            var valuePassedAsNativeStruct = OperatingSystem.IsAndroid() &&
+            var valuePassedAsNativeStruct = Il2CppInteropRuntime.Instance.IsAndroid &&
                                             RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
-
             // il2cpp_value_box uses .NET boxing semantics which boxes Nullable<T> as just T,
             // losing the HasValue field. Manually box Nullable<T> to preserve full data.
             bool isNullable = managedParamType.IsGenericType &&
@@ -436,8 +435,6 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
                 // Box struct into object first before conversion
                 il.Emit(OpCodes.Ldc_I8, classPtr.ToInt64());
                 il.Emit(OpCodes.Conv_I);
-                // Android ARM64 receives the native aggregate directly. Pass its address
-                // to il2cpp_value_box rather than interpreting an all-zero value as null.
                 il.Emit(valuePassedAsNativeStruct || !Environment.Is64BitProcess
                     ? OpCodes.Ldarga
                     : OpCodes.Ldarg, argIndex);

@@ -11,6 +11,7 @@ public record RuntimeConfiguration
 {
     public Version UnityVersion { get; init; }
     public IDetourProvider DetourProvider { get; init; }
+    public bool IsAndroid { get; init; }
 }
 
 public sealed class Il2CppInteropRuntime : BaseHost
@@ -25,12 +26,15 @@ public sealed class Il2CppInteropRuntime : BaseHost
 
     public IDetourProvider DetourProvider { get; private init; }
 
+    public bool IsAndroid { get; private init; }
+
     public static Il2CppInteropRuntime Create(RuntimeConfiguration configuration)
     {
         var res = new Il2CppInteropRuntime
         {
             UnityVersion = configuration.UnityVersion,
-            DetourProvider = configuration.DetourProvider
+            DetourProvider = configuration.DetourProvider,
+            IsAndroid = configuration.IsAndroid
         };
         SetInstance(res);
         res.AddXrefScanner<Il2CppInteropRuntime, XrefScanImpl>();
