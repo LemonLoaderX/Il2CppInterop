@@ -137,7 +137,9 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
 
         // Generate the MethodInfo instances
         var managedHookedMethod = copiedDmd.Generate();
-        var unmanagedTrampolineMethod = GenerateNativeToManagedTrampoline(managedHookedMethod).Generate();
+        var unmanagedTrampolineMethod = GenerateNativeToManagedTrampoline(
+            managedHookedMethod,
+            out var directValueTypeReturnSize).Generate();
 
         // Apply a detour from the unmanaged implementation to the patched harmony method
         var unmanagedDelegateType = DelegateTypeFactory.instance.CreateDelegateType(unmanagedTrampolineMethod,
@@ -146,8 +148,12 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         var unmanagedDelegate = unmanagedTrampolineMethod.CreateDelegate(unmanagedDelegateType);
         DelegateCache.Add(unmanagedDelegate);
 
-        nativeDetour =
-            Il2CppInteropRuntime.Instance.DetourProvider.Create(originalNativeMethodInfo.MethodPointer, unmanagedDelegate);
+        if (directValueTypeReturnSize > 0)
+            ValueTypeReturnRegistry.Register(unmanagedDelegate, directValueTypeReturnSize);
+
+        nativeDetour = Il2CppInteropRuntime.Instance.DetourProvider.Create(
+            originalNativeMethodInfo.MethodPointer,
+            unmanagedDelegate);
         nativeDetour.Apply();
         modifiedNativeMethodInfo.MethodPointer = nativeDetour.OriginalTrampoline;
 
@@ -212,7 +218,9 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         return true;
     }
 
-    private DynamicMethodDefinition GenerateNativeToManagedTrampoline(MethodInfo targetManagedMethodInfo)
+    private DynamicMethodDefinition GenerateNativeToManagedTrampoline(
+        MethodInfo targetManagedMethodInfo,
+        out int directValueTypeReturnSize)
     {
         // managedParams are the interop types used on the managed side
         // unmanagedParams are IntPtr references that are used by IL2CPP compiled assembly
@@ -231,6 +239,16 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         }
 
         var hasReturnBuffer = isReturnValueType && IsReturnBufferNeeded(returnSize);
+        var needsArm64ReturnAdapter = isReturnValueType && !hasReturnBuffer &&
+                                      RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+        directValueTypeReturnSize = needsArm64ReturnAdapter ? returnSize : 0;
+        if (needsArm64ReturnAdapter)
+        {
+            // CoreCLR's reverse P/Invoke stub does not reliably preserve small aggregate
+            // returns in x0/x1. Return the boxed IL2CPP value as a pointer and let the
+            // native ARM64 adapter load its payload into the ABI result registers.
+            unmanagedReturnType = typeof(IntPtr);
+        }
         if (hasReturnBuffer)
         // C compilers seem to return large structs by allocating a return buffer on caller's side and passing it as the first parameter
         // TODO: Handle ARM
@@ -333,6 +351,11 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
                 // Return the same pointer to the return buffer
                 il.Emit(OpCodes.Ldarg_0);
             }
+            else if (needsArm64ReturnAdapter)
+            {
+                il.Emit(OpCodes.Ldloc, managedReturnVariable);
+                il.Emit(OpCodes.Call, ObjectBaseToPtrNotNullMethodInfo);
+            }
             else
             {
                 il.Emit(OpCodes.Ldloc, managedReturnVariable);
@@ -381,6 +404,8 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         if (needsBoxing)
         {
             var classPtr = Il2CppClassPointerStore.GetNativeClassPointer(managedParamType);
+            var valuePassedAsNativeStruct = OperatingSystem.IsAndroid() &&
+                                            RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
 
             // il2cpp_value_box uses .NET boxing semantics which boxes Nullable<T> as just T,
             // losing the HasValue field. Manually box Nullable<T> to preserve full data.
@@ -397,7 +422,9 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
                 il.Emit(OpCodes.Call, AccessTools.Method(typeof(IL2CPP), nameof(IL2CPP.il2cpp_object_new)));
                 var objLocal = il.DeclareLocal(typeof(IntPtr));
                 il.Emit(OpCodes.Stloc, objLocal);
-                il.Emit(Environment.Is64BitProcess ? OpCodes.Ldarg : OpCodes.Ldarga_S, argIndex);
+                il.Emit(valuePassedAsNativeStruct || !Environment.Is64BitProcess
+                    ? OpCodes.Ldarga
+                    : OpCodes.Ldarg, argIndex);
                 il.Emit(OpCodes.Ldloc, objLocal);
                 il.Emit(OpCodes.Call, AccessTools.Method(typeof(IL2CPP), nameof(IL2CPP.il2cpp_object_unbox)));
                 il.Emit(OpCodes.Ldc_I4, (int)valueSize);
@@ -409,9 +436,11 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
                 // Box struct into object first before conversion
                 il.Emit(OpCodes.Ldc_I8, classPtr.ToInt64());
                 il.Emit(OpCodes.Conv_I);
-                // On x64, struct is always a pointer but it is a non-pointer on x86
-                // We don't handle byref structs on x86 yet but we're yet to encounter those
-                il.Emit(Environment.Is64BitProcess ? OpCodes.Ldarg : OpCodes.Ldarga_S, argIndex);
+                // Android ARM64 receives the native aggregate directly. Pass its address
+                // to il2cpp_value_box rather than interpreting an all-zero value as null.
+                il.Emit(valuePassedAsNativeStruct || !Environment.Is64BitProcess
+                    ? OpCodes.Ldarga
+                    : OpCodes.Ldarg, argIndex);
                 il.Emit(OpCodes.Call,
                     AccessTools.Method(typeof(IL2CPP),
                         nameof(IL2CPP.il2cpp_value_box)));

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.InteropServices;
 using Il2CppInterop.Runtime.InteropTypes;
 
 namespace Il2CppInterop.Runtime.Injection;
@@ -12,7 +13,7 @@ internal static class TrampolineHelpers
     private static ModuleBuilder _fixedStructModuleBuilder;
     private static readonly Dictionary<int, Type> _fixedStructCache = new();
 
-    private static Type GetFixedSizeStructType(int size)
+    internal static Type GetFixedSizeStructType(int size)
     {
         if (_fixedStructCache.TryGetValue(size, out var result))
         {
@@ -45,9 +46,14 @@ internal static class TrampolineHelpers
                 return typeof(IntPtr*);
             }
         }
-        else if (managedType.IsSubclassOf(typeof(Il2CppSystem.ValueType)) && !Environment.Is64BitProcess)
+        else if (managedType.IsSubclassOf(typeof(Il2CppSystem.ValueType)) &&
+                 (!Environment.Is64BitProcess ||
+                  (OperatingSystem.IsAndroid() &&
+                   RuntimeInformation.ProcessArchitecture == Architecture.Arm64)))
         {
-            // Struct that's passed on the stack => handle as general struct
+            // CoreCLR wrapper classes do not describe the native IL2CPP aggregate ABI.
+            // Receive Android ARM64 value types as exact-size structs so zero-valued
+            // aggregates are not mistaken for null pointers.
             uint align = 0;
             var fixedSize = IL2CPP.il2cpp_class_value_size(Il2CppClassPointerStore.GetNativeClassPointer(managedType), ref align);
             return GetFixedSizeStructType(fixedSize);
