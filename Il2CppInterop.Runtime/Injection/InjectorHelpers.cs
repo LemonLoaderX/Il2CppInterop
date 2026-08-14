@@ -27,11 +27,20 @@ namespace Il2CppInterop.Runtime.Injection
         internal static Assembly Il2CppMscorlib = typeof(Il2CppSystem.Type).Assembly;
         internal static INativeAssemblyStruct InjectedAssembly;
         internal static INativeImageStruct InjectedImage;
-        internal static ProcessModule Il2CppModule = Process.GetCurrentProcess()
-            .Modules.OfType<ProcessModule>()
-            .Single((x) => x.ModuleName is "GameAssembly.dll" or "GameAssembly.so" or "UserAssembly.dll");
+        private static ProcessModule? s_Il2CppModule;
+        internal static ProcessModule Il2CppModule => s_Il2CppModule ??=
+            Process.GetCurrentProcess()
+                .Modules.OfType<ProcessModule>()
+                .Single((x) => x.ModuleName is "GameAssembly.dll" or "GameAssembly.so" or "UserAssembly.dll" or "libil2cpp.so");
 
-        internal static IntPtr Il2CppHandle = NativeLibrary.Load("GameAssembly", typeof(InjectorHelpers).Assembly, null);
+        internal static IntPtr Il2CppHandle = NativeLibrary.Load(
+            IsAndroidRuntime() ? "libil2cpp.so" : "GameAssembly",
+            typeof(InjectorHelpers).Assembly,
+            null);
+
+        private static bool IsAndroidRuntime() =>
+            OperatingSystem.IsAndroid() ||
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDROID_ROOT"));
 
         internal static readonly Dictionary<Type, OpCode> StIndOpcodes = new()
         {
