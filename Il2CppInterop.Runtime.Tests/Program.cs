@@ -3,6 +3,8 @@ using Il2CppInterop.Runtime.Injection;
 
 VerifyHfa<Float2>(8, typeof(float), 2);
 VerifyHfa<Double4>(32, typeof(double), 4);
+VerifyHfa<SequentialFloat3>(12, typeof(float), 3);
+VerifyHfa<NestedFloat4>(16, typeof(float), 4);
 
 var mixed = TrampolineHelpers.GetFixedSizeStructType(typeof(Mixed), 8);
 Assert(!TrampolineHelpers.IsArm64Hfa(mixed), "Mixed aggregates must use the integer ABI class.");
@@ -62,4 +64,19 @@ struct Float5
     [FieldOffset(8)] public float C;
     [FieldOffset(12)] public float D;
     [FieldOffset(16)] public float E;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+struct SequentialFloat3
+{
+    public float X;
+    public float Y;
+    public float Z;
+}
+
+[StructLayout(LayoutKind.Explicit, Size = 16)]
+struct NestedFloat4
+{
+    [FieldOffset(0)] public Float2 A;
+    [FieldOffset(8)] public Float2 B;
 }

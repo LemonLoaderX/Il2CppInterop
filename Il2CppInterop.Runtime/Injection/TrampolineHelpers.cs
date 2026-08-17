@@ -102,31 +102,80 @@ internal static class TrampolineHelpers
     {
         elementType = typeof(void);
         elementCount = 0;
-        var fields = managedType
-            .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .Where(field => !field.IsStatic)
-            .OrderBy(field => field.GetCustomAttribute<FieldOffsetAttribute>()?.Value ?? int.MaxValue)
-            .ToArray();
-        if (fields.Length is < 1 or > 4 ||
-            fields.Any(field => field.FieldType != typeof(float) && field.FieldType != typeof(double)))
+        var elements = new List<(Type Type, int Offset)>();
+        if (!TryCollectArm64HfaElements(managedType, 0, elements) ||
+            elements.Count is < 1 or > 4)
         {
             return false;
         }
 
-        var candidateElementType = fields[0].FieldType;
-        if (fields.Any(field => field.FieldType != candidateElementType))
+        var candidateElementType = elements[0].Type;
+        if (elements.Any(element => element.Type != candidateElementType))
             return false;
         elementType = candidateElementType;
 
         var elementSize = elementType == typeof(float) ? sizeof(float) : sizeof(double);
-        for (var index = 0; index < fields.Length; index++)
+        var orderedElements = elements.OrderBy(element => element.Offset).ToArray();
+        for (var index = 0; index < orderedElements.Length; index++)
         {
-            if (fields[index].GetCustomAttribute<FieldOffsetAttribute>()?.Value != index * elementSize)
+            if (orderedElements[index].Offset != index * elementSize)
                 return false;
         }
 
-        elementCount = fields.Length;
+        elementCount = orderedElements.Length;
         return size == elementCount * elementSize;
+    }
+
+    private static bool TryCollectArm64HfaElements(
+        Type type,
+        int baseOffset,
+        ICollection<(Type Type, int Offset)> elements)
+    {
+        if (type == typeof(float) || type == typeof(double))
+        {
+            elements.Add((type, baseOffset));
+            return true;
+        }
+        if (!type.IsValueType || type.IsEnum || type.IsPrimitive)
+            return false;
+
+        var fields = type
+            .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(field => !field.IsStatic)
+            .ToArray();
+        if (fields.Length == 0)
+            return false;
+
+        foreach (var field in fields)
+        {
+            int offset;
+            var explicitOffset = field.GetCustomAttribute<FieldOffsetAttribute>();
+            if (explicitOffset != null)
+            {
+                offset = explicitOffset.Value;
+            }
+            else
+            {
+                try
+                {
+                    offset = checked((int)Marshal.OffsetOf(type, field.Name));
+                }
+                catch (ArgumentException)
+                {
+                    return false;
+                }
+            }
+
+            if (!TryCollectArm64HfaElements(
+                    field.FieldType,
+                    checked(baseOffset + offset),
+                    elements) ||
+                elements.Count > 4)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     internal static Type NativeType(this Type managedType)
