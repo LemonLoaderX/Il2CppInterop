@@ -228,6 +228,8 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
 
         var managedReturnType = AccessTools.GetReturnedType(Original);
         var unmanagedReturnType = managedReturnType.NativeType();
+        var isAndroidArm64 = Il2CppInteropRuntime.Instance.IsAndroid &&
+                             RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
 
         var returnSize = IntPtr.Size;
 
@@ -238,10 +240,14 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
             returnSize = IL2CPP.il2cpp_class_value_size(Il2CppClassPointerStore.GetNativeClassPointer(managedReturnType), ref align);
         }
 
-        var hasReturnBuffer = isReturnValueType && IsReturnBufferNeeded(returnSize);
-        var needsArm64ReturnAdapter = Il2CppInteropRuntime.Instance.IsAndroid &&
-                                      isReturnValueType && !hasReturnBuffer &&
-                                      RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+        var isArm64Hfa = isAndroidArm64 && TrampolineHelpers.IsArm64Hfa(unmanagedReturnType);
+        // CoreCLR applies AAPCS64 to the generated aggregate type. In particular,
+        // HFAs use v0-v3 and large indirect results use x8, not an x0 buffer argument.
+        var hasReturnBuffer = isReturnValueType && !isAndroidArm64 && IsReturnBufferNeeded(returnSize);
+        var needsArm64ReturnAdapter = isAndroidArm64 && isReturnValueType &&
+                                      !isArm64Hfa && returnSize <= 16;
+        var returnsArm64Aggregate = isAndroidArm64 && isReturnValueType &&
+                                    !needsArm64ReturnAdapter;
         directValueTypeReturnSize = needsArm64ReturnAdapter ? returnSize : 0;
         if (needsArm64ReturnAdapter)
         {
@@ -356,6 +362,13 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
             {
                 il.Emit(OpCodes.Ldloc, managedReturnVariable);
                 il.Emit(OpCodes.Call, ObjectBaseToPtrNotNullMethodInfo);
+            }
+            else if (returnsArm64Aggregate)
+            {
+                il.Emit(OpCodes.Ldloc, managedReturnVariable);
+                il.Emit(OpCodes.Call, ObjectBaseToPtrNotNullMethodInfo);
+                EmitUnbox(il);
+                il.Emit(OpCodes.Ldobj, unmanagedReturnType);
             }
             else
             {

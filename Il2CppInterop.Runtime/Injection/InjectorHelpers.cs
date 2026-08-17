@@ -57,6 +57,20 @@ namespace Il2CppInterop.Runtime.Injection
             [typeof(double)] = OpCodes.Stind_R8
         };
 
+        internal static IntPtr ResolveInjectionTarget(
+            InjectionTarget target,
+            Func<IntPtr> fallback)
+        {
+            var resolver = Il2CppInteropRuntime.Instance.InjectionTargetResolver;
+            if (resolver == null)
+                return fallback();
+
+            var result = resolver(target);
+            if (result == IntPtr.Zero)
+                throw new NotSupportedException($"The configured injection target resolver could not resolve {target}.");
+            return result;
+        }
+
         private static void CreateInjectedAssembly()
         {
             InjectedAssembly = UnityVersionHandler.NewAssembly();
@@ -80,7 +94,7 @@ namespace Il2CppInterop.Runtime.Injection
         internal static void Setup()
         {
             if (InjectedAssembly == null) CreateInjectedAssembly();
-            if (Il2CppInteropRuntime.Instance.UnityVersion.Major >= 6000)
+            if (UseThreeArgumentGenericMethodHook(Il2CppInteropRuntime.Instance.UnityVersion))
                 GenericMethodGetMethodHook_Unity6.ApplyHook();
             else
                 GenericMethodGetMethodHook.ApplyHook();
@@ -90,6 +104,11 @@ namespace Il2CppInterop.Runtime.Injection
             FromIl2CppTypeHook.ApplyHook();
             FromNameHook.ApplyHook();
         }
+
+        private static bool UseThreeArgumentGenericMethodHook(Version version) =>
+            version.Major >= 6000 ||
+            version.Major == 2020 && version.Minor == 3 && version.Build >= 48 ||
+            version.Major == 2022 && version.Minor == 3 && version.Build >= 62;
 
         internal static long CreateClassToken(IntPtr classPointer)
         {
@@ -173,6 +192,10 @@ namespace Il2CppInterop.Runtime.Injection
 
         private static d_ClassInit FindClassInit()
         {
+            var configured = ResolveInjectionTarget(InjectionTarget.ClassInit, () => IntPtr.Zero);
+            if (configured != IntPtr.Zero)
+                return Marshal.GetDelegateForFunctionPointer<d_ClassInit>(configured);
+
             static nint GetClassInitSubstitute()
             {
                 if (TryGetIl2CppExport("mono_class_instance_size", out nint classInit))

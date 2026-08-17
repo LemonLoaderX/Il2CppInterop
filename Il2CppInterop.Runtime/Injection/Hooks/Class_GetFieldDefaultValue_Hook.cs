@@ -136,6 +136,13 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
         public override IntPtr FindTargetMethod()
         {
+            return InjectorHelpers.ResolveInjectionTarget(
+                InjectionTarget.ClassGetDefaultFieldValue,
+                FindTargetMethodFallback);
+        }
+
+        private static IntPtr FindTargetMethodFallback()
+        {
             // NOTE: In some cases this pointer will be MetadataCache::GetFieldDefaultValueForField due to Field::GetDefaultFieldValue being
             // inlined but we'll treat it the same even though it doesn't receive the type parameter the RDX register
             // doesn't get cleared so we still get the same parameters

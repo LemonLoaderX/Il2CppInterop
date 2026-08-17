@@ -91,6 +91,13 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
         public override IntPtr FindTargetMethod()
         {
+            return InjectorHelpers.ResolveInjectionTarget(
+                InjectionTarget.GenericMethodGetMethodUnity6,
+                FindTargetMethodFallback);
+        }
+
+        private static IntPtr FindTargetMethodFallback()
+        {
             var getVirtualMethodAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_object_get_virtual_method));
             if (getVirtualMethodAPI == IntPtr.Zero) return IntPtr.Zero;
 

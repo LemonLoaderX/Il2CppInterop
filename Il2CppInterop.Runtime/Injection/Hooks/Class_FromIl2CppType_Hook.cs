@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Il2CppInterop.Common;
 using Il2CppInterop.Common.XrefScans;
 using Il2CppInterop.Runtime.Runtime;
+using Il2CppInterop.Runtime.Startup;
 using Microsoft.Extensions.Logging;
 
 namespace Il2CppInterop.Runtime.Injection.Hooks
@@ -38,10 +39,14 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
         public override IntPtr FindTargetMethod()
         {
-            var classFromTypeAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_class_from_il2cpp_type));
-            Logger.Instance.LogTrace("il2cpp_class_from_il2cpp_type: 0x{ClassFromTypeApiAddress}", classFromTypeAPI.ToInt64().ToString("X2"));
-
-            return XrefScannerLowLevel.JumpTargets(classFromTypeAPI).Single();
+            return InjectorHelpers.ResolveInjectionTarget(
+                InjectionTarget.ClassFromIl2CppType,
+                () =>
+                {
+                    var classFromTypeAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_class_from_il2cpp_type));
+                    Logger.Instance.LogTrace("il2cpp_class_from_il2cpp_type: 0x{ClassFromTypeApiAddress}", classFromTypeAPI.ToInt64().ToString("X2"));
+                    return XrefScannerLowLevel.JumpTargets(classFromTypeAPI).Single();
+                });
         }
     }
 }
