@@ -239,7 +239,8 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         }
 
         var hasReturnBuffer = isReturnValueType && IsReturnBufferNeeded(returnSize);
-        var needsArm64ReturnAdapter = isReturnValueType && !hasReturnBuffer &&
+        var needsArm64ReturnAdapter = Il2CppInteropRuntime.Instance.IsAndroid &&
+                                      isReturnValueType && !hasReturnBuffer &&
                                       RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
         directValueTypeReturnSize = needsArm64ReturnAdapter ? returnSize : 0;
         if (needsArm64ReturnAdapter)
