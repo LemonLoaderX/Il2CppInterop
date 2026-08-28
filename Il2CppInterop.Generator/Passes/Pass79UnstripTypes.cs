@@ -84,6 +84,9 @@ public static class Pass79UnstripTypes
                 enclosingNewType.NestedTypes.Add(clonedType);
             }
 
+            if (clonedType.IsValueType() && unityType.ClassLayout is { } classLayout)
+                clonedType.ClassLayout = new ClassLayout(classLayout.PackingSize, classLayout.ClassSize);
+
             // Unity assemblies sometimes have struct layouts on classes.
             // This gets overlooked on mono but not on coreclr.
             if (!clonedType.IsValueType() && (clonedType.IsExplicitLayout || clonedType.IsSequentialLayout))
