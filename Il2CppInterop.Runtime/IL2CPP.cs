@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
-using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -251,32 +251,13 @@ public static unsafe class IL2CPP
             throw new NullReferenceException();
     }
 
-    public static T ResolveICall<T>(string signature) where T : Delegate
-    {
-        var icallPtr = il2cpp_resolve_icall(signature);
-        if (icallPtr == IntPtr.Zero)
-        {
-            Logger.Instance.LogTrace("ICall {Signature} not resolved", signature);
-            return GenerateDelegateForMissingICall<T>(signature);
-        }
+    /// <summary>Attempts to resolve an IL2CPP internal call without creating a throwing fallback.</summary>
+    public static bool TryResolveICall<T>(string signature, [NotNullWhen(true)] out T? icall) where T : Delegate =>
+        InternalCallResolver.TryResolve(signature, il2cpp_resolve_icall, out icall);
 
-        return Marshal.GetDelegateForFunctionPointer<T>(icallPtr);
-    }
-
-    private static T GenerateDelegateForMissingICall<T>(string signature) where T : Delegate
-    {
-        var invoke = typeof(T).GetMethod("Invoke")!;
-
-        var trampoline = new DynamicMethod("(missing icall delegate) " + typeof(T).FullName,
-            invoke.ReturnType, invoke.GetParameters().Select(it => it.ParameterType).ToArray(), typeof(IL2CPP), true);
-        var bodyBuilder = trampoline.GetILGenerator();
-
-        bodyBuilder.Emit(OpCodes.Ldstr, $"ICall with signature {signature} was not resolved");
-        bodyBuilder.Emit(OpCodes.Newobj, typeof(Exception).GetConstructor(new[] { typeof(string) })!);
-        bodyBuilder.Emit(OpCodes.Throw);
-
-        return (T)trampoline.CreateDelegate(typeof(T));
-    }
+    /// <summary>Resolves an IL2CPP internal call or returns a delegate that reports the missing call when invoked.</summary>
+    public static T ResolveICall<T>(string signature) where T : Delegate =>
+        InternalCallResolver.Resolve<T>(signature, il2cpp_resolve_icall);
 
     public static T? PointerToValueGeneric<T>(IntPtr objectPointer, bool isFieldPointer, bool valueTypeWouldBeBoxed)
     {

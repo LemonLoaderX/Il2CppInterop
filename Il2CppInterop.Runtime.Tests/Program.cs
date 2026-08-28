@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.Injection;
 
 VerifyHfa<Float2>(8, typeof(float), 2);
@@ -14,7 +15,55 @@ var float5 = TrampolineHelpers.GetFixedSizeStructType(typeof(Float5), 20);
 Assert(!TrampolineHelpers.IsArm64Hfa(float5), "AAPCS64 limits HFAs to four elements.");
 Assert(Marshal.SizeOf(float5) == 20, "The non-HFA carrier size is incorrect.");
 
-Console.WriteLine("Android ARM64 aggregate classification tests passed.");
+VerifyResolvedIcall();
+VerifyMissingIcall();
+
+Console.WriteLine("Il2CppInterop runtime regression tests passed.");
+
+static void VerifyResolvedIcall()
+{
+    IncrementICall expected = value => value + 1;
+    var pointer = Marshal.GetFunctionPointerForDelegate(expected);
+    var resolverCalls = 0;
+
+    var resolved = InternalCallResolver.TryResolve(
+        "Fixture::Increment",
+        _ =>
+        {
+            resolverCalls++;
+            return pointer;
+        },
+        out IncrementICall? actual);
+
+    Assert(resolved, "A non-null ICall pointer was not resolved.");
+    Assert(actual is not null && actual(41) == 42, "The resolved ICall delegate returned the wrong value.");
+    Assert(resolverCalls == 1, "The ICall resolver was not invoked exactly once.");
+    GC.KeepAlive(expected);
+}
+
+static void VerifyMissingIcall()
+{
+    const string signature = "UnityEngine.Cursor::get_visible";
+    var resolved = InternalCallResolver.TryResolve<IncrementICall>(
+        signature,
+        _ => IntPtr.Zero,
+        out var unavailable);
+
+    Assert(!resolved && unavailable is null, "A null ICall pointer was reported as available.");
+
+    var missing = InternalCallResolver.Resolve<IncrementICall>(signature, _ => IntPtr.Zero);
+    try
+    {
+        _ = missing(0);
+        throw new InvalidOperationException("The missing ICall delegate did not throw.");
+    }
+    catch (MissingIl2CppInternalCallException exception)
+    {
+        Assert(exception.Signature == signature, "The missing ICall exception lost its signature.");
+        Assert(exception.Message == $"ICall with signature {signature} was not resolved",
+            "The missing ICall error message changed unexpectedly.");
+    }
+}
 
 static void VerifyHfa<T>(int size, Type elementType, int elementCount)
 {
@@ -32,6 +81,9 @@ static void Assert(bool condition, string message)
     if (!condition)
         throw new InvalidOperationException(message);
 }
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+delegate int IncrementICall(int value);
 
 [StructLayout(LayoutKind.Explicit, Size = 8)]
 struct Float2
