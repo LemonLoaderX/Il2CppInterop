@@ -1,6 +1,12 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
+using Il2CppInterop.HarmonySupport;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.Injection;
+using Il2CppInterop.Runtime.InteropTypes;
+using Il2CppInterop.Runtime.Runtime;
+using Il2CppInterop.Runtime.Startup;
+using MonoMod.Utils;
 
 VerifyHfa<Float2>(8, typeof(float), 2);
 VerifyHfa<Double4>(32, typeof(double), 4);
@@ -17,6 +23,9 @@ Assert(Marshal.SizeOf(float5) == 20, "The non-HFA carrier size is incorrect.");
 
 VerifyResolvedIcall();
 VerifyMissingIcall();
+VerifyHookExceptionReporter();
+VerifyArm64ExceptionReturnBuffer();
+VerifyHarmonyTrampolineConversionExceptionReturn();
 
 Console.WriteLine("Il2CppInterop runtime regression tests passed.");
 
@@ -65,6 +74,59 @@ static void VerifyMissingIcall()
     }
 }
 
+static void VerifyHookExceptionReporter()
+{
+    var hook = new ThrowingLogHook();
+    hook.Report(new InvalidOperationException("first"));
+    hook.Report(new InvalidOperationException("second"));
+    Assert(hook.LogCalls == 1,
+        "The native hook exception reporter did not suppress repeated logging or let its logger failure escape.");
+}
+
+static unsafe void VerifyArm64ExceptionReturnBuffer()
+{
+    var first = Il2CppDetourMethodPatcher.GetZeroArm64ValueReturnBuffer();
+    var second = Il2CppDetourMethodPatcher.GetZeroArm64ValueReturnBuffer();
+    Assert(first != IntPtr.Zero && first == second,
+        "The ARM64 value-return exception fallback buffer was not stable and non-null.");
+
+    var size = (IntPtr.Size * 2) + 16;
+    for (var i = 0; i < size; i++)
+        Assert(Marshal.ReadByte(first, i) == 0,
+            "The ARM64 value-return exception fallback buffer was not zero-initialized.");
+}
+
+static unsafe void VerifyHarmonyTrampolineConversionExceptionReturn()
+{
+    Il2CppInteropRuntime.Create(new RuntimeConfiguration
+    {
+        UnityVersion = new Version(6000, 0, 0),
+        DetourProvider = new UnusedDetourProvider(),
+        IsAndroid = false,
+        InjectionTargetResolver = static _ => IntPtr.Zero
+    });
+
+    var original = typeof(TrampolineProbeTargets).GetMethod(
+        nameof(TrampolineProbeTargets.Original),
+        BindingFlags.Public | BindingFlags.Static)!;
+    var conversionFailure = typeof(TrampolineProbeTargets).GetMethod(
+        nameof(TrampolineProbeTargets.ReturnUninitializedObject),
+        BindingFlags.Public | BindingFlags.Static)!;
+    var patcher = new Il2CppDetourMethodPatcher(original);
+    var generate = typeof(Il2CppDetourMethodPatcher).GetMethod(
+        "GenerateNativeToManagedTrampoline",
+        BindingFlags.Instance | BindingFlags.NonPublic)!;
+    object[] arguments = [ conversionFailure, 0 ];
+    var definition = (DynamicMethodDefinition)generate.Invoke(patcher, arguments)!;
+    // Keep this probe focused on Il2CppInterop's generated IL rather than the test project's older MonoMod emitter.
+    var generated = DMDCecilGenerator.Generate(definition);
+    var trampoline = (ConversionFailureTrampoline)generated.CreateDelegate(
+        typeof(ConversionFailureTrampoline));
+
+    Assert(trampoline(null) == IntPtr.Zero,
+        "The Harmony native-to-managed trampoline let a managed return-conversion exception escape.");
+}
+
 static void VerifyHfa<T>(int size, Type elementType, int elementCount)
 {
     var carrier = TrampolineHelpers.GetFixedSizeStructType(typeof(T), size);
@@ -84,6 +146,42 @@ static void Assert(bool condition, string message)
 
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 delegate int IncrementICall(int value);
+
+unsafe delegate IntPtr ConversionFailureTrampoline(Il2CppMethodInfo* methodInfo);
+
+public static class TrampolineProbeTargets
+{
+    public static TrampolineReference Original() => null!;
+
+    public static TrampolineReference ReturnUninitializedObject() =>
+        (TrampolineReference)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(
+            typeof(TrampolineReference));
+}
+
+public sealed class TrampolineReference(IntPtr pointer) : Il2CppObjectBase(pointer);
+
+sealed class UnusedDetourProvider : IDetourProvider
+{
+    public IDetour Create<TDelegate>(nint original, TDelegate target) where TDelegate : Delegate =>
+        throw new InvalidOperationException("The trampoline regression probe must not install a native detour.");
+}
+
+sealed class ThrowingLogHook : Hook<Action>
+{
+    public int LogCalls { get; private set; }
+
+    public void Report(Exception exception) => ReportManagedException(exception);
+
+    protected override void LogManagedException(Exception exception)
+    {
+        LogCalls++;
+        throw new InvalidOperationException("logger failure");
+    }
+
+    public override string TargetMethodName => "RuntimeTest";
+    public override Action GetDetour() => static () => { };
+    public override IntPtr FindTargetMethod() => IntPtr.Zero;
+}
 
 [StructLayout(LayoutKind.Explicit, Size = 8)]
 struct Float2

@@ -1,4 +1,5 @@
 using AsmResolver.DotNet;
+using AsmResolver.DotNet.Signatures;
 using AsmResolver.PE.DotNet.Metadata.Tables;
 using Il2CppInterop.Generator;
 using Il2CppInterop.Generator.Contexts;
@@ -22,11 +23,94 @@ fixedBuffer.ClassLayout = new ClassLayout(1, 6);
 privateImplementationDetails.NestedTypes.Add(fixedBuffer);
 unityModule.TopLevelTypes.Add(privateImplementationDetails);
 
+var genericContainer = new TypeDefinition(
+    "Fixture",
+    "GenericContainer",
+    TypeAttributes.Public,
+    unityModule.DefaultImporter.ImportType(typeof(object)));
+var genericBase = new TypeDefinition(
+    string.Empty,
+    "GenericBase`1",
+    TypeAttributes.NestedPrivate,
+    unityModule.DefaultImporter.ImportType(typeof(object)));
+genericBase.GenericParameters.Add(new GenericParameter(
+    "T", GenericParameterAttributes.DefaultConstructorConstraint));
+genericBase.GenericParameters[0].Constraints.Add(new GenericParameterConstraint(
+    unityModule.DefaultImporter.ImportType(typeof(Exception))));
+genericContainer.NestedTypes.Add(genericBase);
+unityModule.TopLevelTypes.Add(genericContainer);
+var genericDerived = new TypeDefinition(
+    "Fixture",
+    "GenericDerived",
+    TypeAttributes.Public,
+    genericBase.MakeGenericInstanceType(genericContainer.ToTypeSignature()).ToTypeDefOrRef());
+unityModule.TopLevelTypes.Add(genericDerived);
+
+var delegateContainer = new TypeDefinition(
+    "Fixture",
+    "DelegateContainer",
+    TypeAttributes.Public,
+    unityModule.DefaultImporter.ImportType(typeof(object)));
+var nestedDelegate = new TypeDefinition(
+    string.Empty,
+    "Callback",
+    TypeAttributes.NestedPrivate | TypeAttributes.Sealed,
+    unityModule.DefaultImporter.ImportType(typeof(MulticastDelegate)));
+var delegateConstructor = new MethodDefinition(
+    ".ctor",
+    MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName |
+    MethodAttributes.RuntimeSpecialName,
+    MethodSignature.CreateInstance(
+        unityModule.CorLibTypeFactory.Void,
+        unityModule.CorLibTypeFactory.Object,
+        unityModule.CorLibTypeFactory.IntPtr))
+{
+    ImplAttributes = MethodImplAttributes.Runtime
+};
+nestedDelegate.Methods.Add(delegateConstructor);
+var delegateInvoke = new MethodDefinition(
+    "Invoke",
+    MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.Virtual | MethodAttributes.NewSlot,
+    MethodSignature.CreateInstance(unityModule.CorLibTypeFactory.Void))
+{
+    ImplAttributes = MethodImplAttributes.Runtime
+};
+nestedDelegate.Methods.Add(delegateInvoke);
+delegateContainer.NestedTypes.Add(nestedDelegate);
+unityModule.TopLevelTypes.Add(delegateContainer);
+var delegateDerived = new TypeDefinition(
+    "Fixture",
+    "DelegateDerived",
+    TypeAttributes.Public,
+    unityModule.DefaultImporter.ImportType(typeof(Dictionary<,>))
+        .MakeGenericInstanceType(unityModule.CorLibTypeFactory.String, nestedDelegate.ToTypeSignature())
+        .ToTypeDefOrRef());
+unityModule.TopLevelTypes.Add(delegateDerived);
+
+var dependencyAssembly = new AssemblyDefinition("UnityDependencyFixture", new Version(1, 0, 0, 0));
+var dependencyModule = new ModuleDefinition("UnityDependencyFixture.dll");
+dependencyAssembly.Modules.Add(dependencyModule);
+var externalBase = new TypeDefinition(
+    "Fixture.Dependency",
+    "ExternalBase`1",
+    TypeAttributes.Public,
+    dependencyModule.DefaultImporter.ImportType(typeof(object)));
+externalBase.GenericParameters.Add(new GenericParameter("T"));
+dependencyModule.TopLevelTypes.Add(externalBase);
+var externalDerived = new TypeDefinition(
+    "Fixture",
+    "ExternalDerived",
+    TypeAttributes.Public,
+    unityModule.DefaultImporter.ImportType(externalBase)
+        .MakeGenericInstanceType(unityModule.CorLibTypeFactory.String)
+        .ToTypeDefOrRef());
+unityModule.TopLevelTypes.Add(externalDerived);
+
 using var gameAssemblies = new AssemblyMetadataAccess(Array.Empty<AssemblyDefinition>());
 using var context = new RewriteGlobalContext(
     new GeneratorOptions(),
     gameAssemblies,
-    new AssemblyMetadataAccess(new[] { unityAssembly }));
+    new AssemblyMetadataAccess(new[] { unityAssembly, dependencyAssembly }));
 
 Pass79UnstripTypes.DoPass(context);
 
@@ -40,7 +124,50 @@ var outputLayout = outputType.ClassLayout ??
 Assert(outputLayout.PackingSize == 1, "Unstripping changed the class packing size.");
 Assert(outputLayout.ClassSize == 6, "Unstripping changed the explicit class size.");
 
-Console.WriteLine("Il2CppInterop generator layout-preservation tests passed.");
+var outputGenericBase = outputAssembly.ManifestModule.TopLevelTypes
+    .Single(type => type.Name == "GenericContainer")
+    .NestedTypes.Single(type => type.Name == "GenericBase`1");
+Assert(outputGenericBase.GenericParameters.Count == 1,
+    "Unstripping removed the generic type parameter from a reference-type shell.");
+Assert((outputGenericBase.GenericParameters[0].Attributes &
+        GenericParameterAttributes.DefaultConstructorConstraint) == 0,
+    "Unstripping retained a constructor constraint that generated proxy types cannot satisfy.");
+Assert(outputGenericBase.GenericParameters[0].Constraints.Count == 1 &&
+       outputGenericBase.GenericParameters[0].Constraints[0].Constraint?.FullName == typeof(Exception).FullName,
+    "Unstripping removed the generic type constraint from a reference-type shell.");
+var outputGenericDerived = outputAssembly.ManifestModule.TopLevelTypes
+    .Single(type => type.Name == "GenericDerived");
+var outputGenericSignature = (outputGenericDerived.BaseType as TypeSpecification)?.Signature ??
+    throw new InvalidOperationException("The restored generic base did not retain its type specification.");
+var outputGenericBaseReference = outputGenericSignature.GetUnderlyingTypeDefOrRef();
+Assert(ReferenceEquals(outputGenericBaseReference, outputGenericBase),
+    "Unstripping left a same-assembly TypeRef instead of the restored generic TypeDef.");
+
+var outputDelegate = outputAssembly.ManifestModule.TopLevelTypes
+    .Single(type => type.Name == "DelegateContainer")
+    .NestedTypes.Single(type => type.Name == "Callback");
+Assert(outputDelegate.BaseType?.FullName == typeof(MulticastDelegate).FullName,
+    "Unstripping removed the delegate type required by restored signatures.");
+var outputDelegateInvoke = outputDelegate.Methods.SingleOrDefault(method => method.Name == "Invoke");
+Assert(outputDelegateInvoke != null && outputDelegateInvoke.ImplAttributes == MethodImplAttributes.Runtime,
+    "Unstripping did not preserve the runtime Invoke signature on a referenced delegate.");
+var outputDelegateDerived = outputAssembly.ManifestModule.TopLevelTypes
+    .Single(type => type.Name == "DelegateDerived");
+var outputDelegateSignature = (outputDelegateDerived.BaseType as TypeSpecification)?.Signature as
+    GenericInstanceTypeSignature ??
+    throw new InvalidOperationException("The restored delegate reference did not retain its generic signature.");
+var outputDelegateArgument = outputDelegateSignature.TypeArguments[1]
+    .GetUnderlyingTypeDefOrRef();
+Assert(ReferenceEquals(outputDelegateArgument, outputDelegate),
+    "Unstripping left a same-assembly TypeRef instead of the restored delegate TypeDef.");
+
+var outputDependency = context.GetAssemblyByName("UnityDependencyFixture").NewAssembly;
+var outputExternalBase = outputDependency.ManifestModule!.TopLevelTypes
+    .Single(type => type.Name == "ExternalBase`1");
+Assert(outputExternalBase.GenericParameters.Count == 1,
+    "Unstripping did not restore a generic type referenced by another Unity module.");
+
+Console.WriteLine("Il2CppInterop generator type-preservation tests passed.");
 
 static void Assert(bool condition, string message)
 {

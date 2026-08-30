@@ -79,11 +79,7 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
             }
             catch (Exception ex)
             {
-                // CRITICAL: On Linux, an unhandled exception in a hook = SIGSEGV.
-                // We must catch and log, then return original.
-#if DEBUG
-                Logger.Instance.LogError($"[GenericHook] Exception: {ex.Message}");
-#endif
+                ReportManagedException(ex);
             }
 
             return Original(methodDefinition, classInst, methodInst);

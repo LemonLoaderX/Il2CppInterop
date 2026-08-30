@@ -1,6 +1,7 @@
 ﻿using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
+using System.Threading;
 using HarmonyLib;
 using HarmonyLib.Public.Patching;
 using Il2CppInterop.Common;
@@ -60,6 +61,7 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
 
     private static readonly List<object> DelegateCache = new();
     private static readonly List<object> DetourCache = new();
+    private static IntPtr ZeroArm64ValueReturnBuffer;
 
     private INativeMethodInfoStruct modifiedNativeMethodInfo;
 
@@ -248,6 +250,9 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
                                       !isArm64Hfa && returnSize <= 16;
         var returnsArm64Aggregate = isAndroidArm64 && isReturnValueType &&
                                     !needsArm64ReturnAdapter;
+        var arm64ExceptionReturnPointer = needsArm64ReturnAdapter
+            ? GetZeroArm64ValueReturnBuffer()
+            : IntPtr.Zero;
         directValueTypeReturnSize = needsArm64ReturnAdapter ? returnSize : 0;
         if (needsArm64ReturnAdapter)
         {
@@ -296,6 +301,9 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         );
 
         var il = dmd.GetILGenerator();
+        LocalBuilder unmanagedReturnVariable = null;
+        if (unmanagedReturnType != typeof(void))
+            unmanagedReturnVariable = il.DeclareLocal(unmanagedReturnType);
         il.BeginExceptionBlock();
 
         // Declare a list of variables to dereference back to the original pointers.
@@ -338,11 +346,6 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
             il.Emit(StIndOpcodes.TryGetValue(directType, out var stindOpCodde) ? stindOpCodde : OpCodes.Stind_I);
         }
 
-        // Handle any lingering exceptions
-        il.BeginCatchBlock(typeof(Exception));
-        il.Emit(OpCodes.Call, ReportExceptionMethodInfo);
-        il.EndExceptionBlock();
-
         // Convert the return value back to an IL2CPP friendly type (if there was a return value), and then return
         if (managedReturnVariable != null)
         {
@@ -375,8 +378,39 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
                 il.Emit(OpCodes.Ldloc, managedReturnVariable);
                 EmitConvertManagedTypeToIL2CPP(il, managedReturnType);
             }
+
+            il.Emit(OpCodes.Stloc, unmanagedReturnVariable);
         }
 
+        // No managed exception may cross the reverse P/Invoke boundary. Keep return conversion
+        // inside the protected region as it can allocate or dereference an IL2CPP wrapper.
+        il.BeginCatchBlock(typeof(Exception));
+        il.Emit(OpCodes.Call, ReportExceptionMethodInfo);
+        if (unmanagedReturnVariable != null)
+        {
+            il.Emit(OpCodes.Ldloca, unmanagedReturnVariable);
+            il.Emit(OpCodes.Initobj, unmanagedReturnType);
+
+            if (hasReturnBuffer)
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldc_I4_0);
+                il.Emit(OpCodes.Ldc_I4, returnSize);
+                il.Emit(OpCodes.Initblk);
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Stloc, unmanagedReturnVariable);
+            }
+            else if (needsArm64ReturnAdapter)
+            {
+                il.Emit(OpCodes.Ldc_I8, arm64ExceptionReturnPointer.ToInt64());
+                il.Emit(OpCodes.Conv_I);
+                il.Emit(OpCodes.Stloc, unmanagedReturnVariable);
+            }
+        }
+        il.EndExceptionBlock();
+
+        if (unmanagedReturnVariable != null)
+            il.Emit(OpCodes.Ldloc, unmanagedReturnVariable);
         il.Emit(OpCodes.Ret);
 
         return dmd;
@@ -391,8 +425,50 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         il.Emit(OpCodes.Add);
     }
 
-    private static void ReportException(Exception ex) =>
-        Logger.Instance.LogError(ex, "During invoking native->managed trampoline");
+    private static void ReportException(Exception exception)
+    {
+        try
+        {
+            Logger.Instance.LogError(exception, "During invoking native->managed trampoline");
+        }
+        catch
+        {
+            try
+            {
+                Console.Error.WriteLine(
+                    "During invoking native->managed trampoline: " + exception);
+            }
+            catch
+            {
+                // An exception reporter must never escape the reverse P/Invoke boundary.
+            }
+        }
+    }
+
+    internal static IntPtr GetZeroArm64ValueReturnBuffer()
+    {
+        var current = Interlocked.CompareExchange(
+            ref ZeroArm64ValueReturnBuffer,
+            IntPtr.Zero,
+            IntPtr.Zero);
+        if (current != IntPtr.Zero)
+            return current;
+
+        const int maximumDirectReturnSize = 16;
+        var allocationSize = checked((IntPtr.Size * 2) + maximumDirectReturnSize);
+        var allocated = Marshal.AllocHGlobal(allocationSize);
+        new Span<byte>(allocated.ToPointer(), allocationSize).Clear();
+
+        current = Interlocked.CompareExchange(
+            ref ZeroArm64ValueReturnBuffer,
+            allocated,
+            IntPtr.Zero);
+        if (current == IntPtr.Zero)
+            return allocated;
+
+        Marshal.FreeHGlobal(allocated);
+        return current;
+    }
 
     private static void EmitConvertManagedTypeToIL2CPP(ILGenerator il, Type returnType)
     {

@@ -190,14 +190,7 @@ public static class DelegateSupport
             bodyBuilder.Emit(OpCodes.Stloc, returnLocal);
         }
 
-        var exceptionLocal = bodyBuilder.DeclareLocal(typeof(Exception));
         bodyBuilder.BeginCatchBlock(typeof(Exception));
-        bodyBuilder.Emit(OpCodes.Stloc, exceptionLocal);
-        bodyBuilder.Emit(OpCodes.Ldstr, "Exception in IL2CPP-to-Managed trampoline, not passing it to il2cpp: ");
-        bodyBuilder.Emit(OpCodes.Ldloc, exceptionLocal);
-        bodyBuilder.Emit(OpCodes.Callvirt, typeof(object).GetMethod(nameof(ToString))!);
-        bodyBuilder.Emit(OpCodes.Call,
-            typeof(string).GetMethod(nameof(string.Concat), new[] { typeof(string), typeof(string) })!);
         bodyBuilder.Emit(OpCodes.Call, typeof(DelegateSupport).GetMethod(nameof(LogError), BindingFlags.Static | BindingFlags.NonPublic)!);
 
         bodyBuilder.EndExceptionBlock();
@@ -209,9 +202,26 @@ public static class DelegateSupport
         return trampoline.CreateDelegate(GetOrCreateDelegateType(signature, managedMethod));
     }
 
-    private static void LogError(string message)
+    private static void LogError(Exception exception)
     {
-        Logger.Instance.LogError("{Message}", message);
+        try
+        {
+            Logger.Instance.LogError(
+                exception,
+                "Exception in IL2CPP-to-Managed delegate trampoline, not passing it to IL2CPP");
+        }
+        catch
+        {
+            try
+            {
+                Console.Error.WriteLine(
+                    "Exception in IL2CPP-to-Managed delegate trampoline: " + exception);
+            }
+            catch
+            {
+                // An exception reporter must never escape the reverse P/Invoke boundary.
+            }
+        }
     }
 
     public static TIl2Cpp? ConvertDelegate<TIl2Cpp>(Delegate @delegate) where TIl2Cpp : Il2CppObjectBase

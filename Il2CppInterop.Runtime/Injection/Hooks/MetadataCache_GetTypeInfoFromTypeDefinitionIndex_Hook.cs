@@ -20,8 +20,15 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
         private Il2CppClass* Hook(int index)
         {
-            if (InjectorHelpers.s_InjectedClasses.TryGetValue(index, out IntPtr classPtr))
-                return (Il2CppClass*)classPtr;
+            try
+            {
+                if (InjectorHelpers.s_InjectedClasses.TryGetValue(index, out IntPtr classPtr))
+                    return (Il2CppClass*)classPtr;
+            }
+            catch (Exception exception)
+            {
+                ReportManagedException(exception);
+            }
 
             return Original(index);
         }

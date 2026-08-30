@@ -921,17 +921,21 @@ public static unsafe partial class ClassInjector
 
         var managedParameters = new[] { monoMethod.DeclaringType }
             .Concat(monoMethod.GetParameters().Select(it => it.ParameterType)).ToArray();
+        var nativeReturnType = monoMethod.ReturnType.NativeType();
 
         var method = new DynamicMethod(
             "Trampoline_" + ExtractSignature(monoMethod) + monoMethod.DeclaringType + monoMethod.Name,
             MethodAttributes.Static | MethodAttributes.Public, CallingConventions.Standard,
-            monoMethod.ReturnType.NativeType(), nativeParameterTypes,
+            nativeReturnType, nativeParameterTypes,
             monoMethod.DeclaringType, true);
 
         var signature = new DelegateSupport.MethodSignature(monoMethod, true);
         var delegateType = DelegateSupport.GetOrCreateDelegateType(signature, monoMethod);
 
         var body = method.GetILGenerator();
+        LocalBuilder nativeReturnVariable = null;
+        if (nativeReturnType != typeof(void))
+            nativeReturnVariable = body.DeclareLocal(nativeReturnType);
 
         body.BeginExceptionBlock();
 
@@ -1028,19 +1032,6 @@ public static unsafe partial class ClassInjector
                 ? stindOpCodde
                 : OpCodes.Stind_I);
         }
-        // body.Emit(OpCodes.Ret); // breaks coreclr
-
-        var exceptionLocal = body.DeclareLocal(typeof(Exception));
-        body.BeginCatchBlock(typeof(Exception));
-        body.Emit(OpCodes.Stloc, exceptionLocal);
-        body.Emit(OpCodes.Ldstr, "Exception in IL2CPP-to-Managed trampoline, not passing it to il2cpp: ");
-        body.Emit(OpCodes.Ldloc, exceptionLocal);
-        body.Emit(OpCodes.Callvirt, typeof(object).GetMethod(nameof(ToString))!);
-        body.Emit(OpCodes.Call,
-            typeof(string).GetMethod(nameof(string.Concat), new[] { typeof(string), typeof(string) })!);
-        body.Emit(OpCodes.Call, typeof(ClassInjector).GetMethod(nameof(LogError), BindingFlags.Static | BindingFlags.NonPublic)!);
-
-        body.EndExceptionBlock();
 
         if (managedReturnVariable != null)
         {
@@ -1049,7 +1040,16 @@ public static unsafe partial class ClassInjector
                 body.Emit(OpCodes.Call, typeof(IL2CPP).GetMethod(nameof(IL2CPP.ManagedStringToIl2Cpp))!);
             else if (!monoMethod.ReturnType.IsValueType)
                 body.Emit(OpCodes.Call, typeof(IL2CPP).GetMethod(nameof(IL2CPP.Il2CppObjectBaseToPtr))!);
+            body.Emit(OpCodes.Stloc, nativeReturnVariable);
         }
+
+        body.BeginCatchBlock(typeof(Exception));
+        body.Emit(OpCodes.Call, typeof(ClassInjector).GetMethod(nameof(LogError), BindingFlags.Static | BindingFlags.NonPublic)!);
+
+        body.EndExceptionBlock();
+
+        if (nativeReturnVariable != null)
+            body.Emit(OpCodes.Ldloc, nativeReturnVariable);
 
         body.Emit(OpCodes.Ret);
 
@@ -1058,9 +1058,26 @@ public static unsafe partial class ClassInjector
         return @delegate;
     }
 
-    private static void LogError(string message)
+    private static void LogError(Exception exception)
     {
-        Logger.Instance.LogError("{Message}", message);
+        try
+        {
+            Logger.Instance.LogError(
+                exception,
+                "Exception in IL2CPP-to-Managed trampoline, not passing it to IL2CPP");
+        }
+        catch
+        {
+            try
+            {
+                Console.Error.WriteLine(
+                    "Exception in IL2CPP-to-Managed trampoline: " + exception);
+            }
+            catch
+            {
+                // An exception reporter must never escape the reverse P/Invoke boundary.
+            }
+        }
     }
 
     private static string ExtractSignature(MethodInfo monoMethod)

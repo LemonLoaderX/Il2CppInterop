@@ -4,8 +4,16 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Il2CppInterop.Runtime\Il2CppInterop.Runtime.csproj" />
+    <ProjectReference Include="..\Il2CppInterop.HarmonySupport\Il2CppInterop.HarmonySupport.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Il2Cppmscorlib">
+      <Private>true</Private>
+      <HintPath>..\Il2CppInterop.Runtime\Libs\Il2Cppmscorlib.dll</HintPath>
+    </Reference>
   </ItemGroup>
 </Project>

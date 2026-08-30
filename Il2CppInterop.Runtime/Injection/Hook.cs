@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 using Il2CppInterop.Common;
 using Microsoft.Extensions.Logging;
 
@@ -11,12 +12,34 @@ namespace Il2CppInterop.Runtime.Injection
         private T _detour;
         private T _method;
         private T _original;
+        private int _exceptionReported;
 
         public T Original => _original;
 
         public abstract string TargetMethodName { get; }
         public abstract T GetDetour();
         public abstract IntPtr FindTargetMethod();
+
+        protected void ReportManagedException(Exception exception)
+        {
+            if (Interlocked.Exchange(ref _exceptionReported, 1) != 0)
+                return;
+
+            try
+            {
+                LogManagedException(exception);
+            }
+            catch
+            {
+                // Logging must never let an exception escape a reverse P/Invoke hook.
+            }
+        }
+
+        protected virtual void LogManagedException(Exception exception) =>
+            Logger.Instance.LogError(
+                exception,
+                "Managed exception in native hook {TargetMethodName}; falling back to the original IL2CPP method. Further exceptions from this hook will be suppressed.",
+                TargetMethodName);
 
         public virtual void TargetMethodNotFound()
         {
