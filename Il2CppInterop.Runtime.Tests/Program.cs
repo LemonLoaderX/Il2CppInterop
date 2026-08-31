@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Il2CppInterop.HarmonySupport;
 using Il2CppInterop.Runtime;
 using Il2CppInterop.Runtime.Injection;
+using Il2CppInterop.Runtime.Injection.Hooks;
 using Il2CppInterop.Runtime.InteropTypes;
 using Il2CppInterop.Runtime.Runtime;
 using Il2CppInterop.Runtime.Startup;
@@ -24,6 +25,7 @@ Assert(Marshal.SizeOf(float5) == 20, "The non-HFA carrier size is incorrect.");
 VerifyResolvedIcall();
 VerifyMissingIcall();
 VerifyHookExceptionReporter();
+VerifyGenericMethodResolvers();
 VerifyArm64ExceptionReturnBuffer();
 VerifyHarmonyTrampolineConversionExceptionReturn();
 
@@ -81,6 +83,61 @@ static void VerifyHookExceptionReporter()
     hook.Report(new InvalidOperationException("second"));
     Assert(hook.LogCalls == 1,
         "The native hook exception reporter did not suppress repeated logging or let its logger failure escape.");
+}
+
+static void VerifyGenericMethodResolvers()
+{
+    Assert(!InjectorHelpers.UseThreeArgumentGenericMethodHook(new Version(2020, 3, 47)),
+        "Unity 2020.3.47 must retain the legacy generic-method ABI.");
+    Assert(InjectorHelpers.UseThreeArgumentGenericMethodHook(new Version(2020, 3, 48)),
+        "Unity 2020.3.48 must use the three-argument generic-method ABI.");
+    Assert(!InjectorHelpers.UseThreeArgumentGenericMethodHook(new Version(2022, 3, 61)),
+        "Unity 2022.3.61 must retain the legacy generic-method ABI.");
+    Assert(InjectorHelpers.UseThreeArgumentGenericMethodHook(new Version(2022, 3, 62)),
+        "Unity 2022.3.62 must use the three-argument generic-method ABI.");
+    Assert(InjectorHelpers.UseThreeArgumentGenericMethodHook(new Version(6000, 0, 0)),
+        "Unity 6000 must use the three-argument generic-method ABI.");
+
+    var expectedLegacy = (IntPtr)0x12345678;
+    var expectedThreeArgument = (IntPtr)0x23456789;
+    var requested = new List<InjectionTarget>();
+    Il2CppInteropRuntime.Create(new RuntimeConfiguration
+    {
+        UnityVersion = new Version(2022, 3, 44),
+        DetourProvider = new UnusedDetourProvider(),
+        IsAndroid = true,
+        InjectionTargetResolver = target =>
+        {
+            requested.Add(target);
+            return target switch
+            {
+                InjectionTarget.GenericMethodGetMethodLegacy => expectedLegacy,
+                InjectionTarget.GenericMethodGetMethodThreeArgument => expectedThreeArgument,
+                _ => IntPtr.Zero
+            };
+        }
+    });
+
+    var actualLegacy = new GenericMethod_GetMethod_Legacy_Hook().FindTargetMethod();
+    var actualThreeArgument = new GenericMethod_GetMethod_ThreeArgument_Hook().FindTargetMethod();
+    Assert(actualLegacy == expectedLegacy,
+        "The legacy generic-method hook ignored the configured native resolver.");
+    Assert(actualThreeArgument == expectedThreeArgument,
+        "The three-argument generic-method hook ignored the configured native resolver.");
+    Assert(requested.Count == 2 && requested[0] == InjectionTarget.GenericMethodGetMethodLegacy,
+        "The legacy generic-method hook requested the wrong native target.");
+    Assert(requested[1] == InjectionTarget.GenericMethodGetMethodThreeArgument,
+        "The three-argument generic-method hook requested the wrong native target.");
+    Assert((uint)InjectionTarget.GenericMethodGetMethodThreeArgument == 1,
+        "The three-argument generic-method target ID changed.");
+    Assert((uint)InjectionTarget.GenericMethodGetMethodLegacy == 7,
+        "The legacy generic-method target ID changed.");
+    Assert(Enum.Parse<InjectionTarget>("GenericMethodGetMethodUnity6") ==
+           InjectionTarget.GenericMethodGetMethodThreeArgument,
+        "The legacy Unity6 target name is no longer a compatible alias.");
+    Assert(Enum.Parse<InjectionTarget>("GenericMethodGetMethod") ==
+           InjectionTarget.GenericMethodGetMethodLegacy,
+        "The legacy generic-method target name is no longer a compatible alias.");
 }
 
 static unsafe void VerifyArm64ExceptionReturnBuffer()

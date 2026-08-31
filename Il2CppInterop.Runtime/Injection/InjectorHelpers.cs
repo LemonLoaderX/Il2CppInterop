@@ -85,8 +85,8 @@ namespace Il2CppInterop.Runtime.Injection
                 InjectedImage.NameNoExt = InjectedAssembly.Name.Name;
         }
 
-        private static readonly GenericMethod_GetMethod_Hook GenericMethodGetMethodHook = new();
-        private static readonly GenericMethod_GetMethod_Unity6_Hook GenericMethodGetMethodHook_Unity6 = new();
+        private static readonly GenericMethod_GetMethod_Legacy_Hook GenericMethodGetMethodHookLegacy = new();
+        private static readonly GenericMethod_GetMethod_ThreeArgument_Hook GenericMethodGetMethodHookThreeArgument = new();
         private static readonly MetadataCache_GetTypeInfoFromTypeDefinitionIndex_Hook GetTypeInfoFromTypeDefinitionIndexHook = new();
         private static readonly Class_GetFieldDefaultValue_Hook GetFieldDefaultValueHook = new();
         private static readonly Class_FromIl2CppType_Hook FromIl2CppTypeHook = new();
@@ -95,9 +95,9 @@ namespace Il2CppInterop.Runtime.Injection
         {
             if (InjectedAssembly == null) CreateInjectedAssembly();
             if (UseThreeArgumentGenericMethodHook(Il2CppInteropRuntime.Instance.UnityVersion))
-                GenericMethodGetMethodHook_Unity6.ApplyHook();
+                GenericMethodGetMethodHookThreeArgument.ApplyHook();
             else
-                GenericMethodGetMethodHook.ApplyHook();
+                GenericMethodGetMethodHookLegacy.ApplyHook();
             GetTypeInfoFromTypeDefinitionIndexHook.ApplyHook();
             GetFieldDefaultValueHook.ApplyHook();
             ClassInit ??= FindClassInit();
@@ -105,7 +105,7 @@ namespace Il2CppInterop.Runtime.Injection
             FromNameHook.ApplyHook();
         }
 
-        private static bool UseThreeArgumentGenericMethodHook(Version version) =>
+        internal static bool UseThreeArgumentGenericMethodHook(Version version) =>
             version.Major >= 6000 ||
             version.Major == 2020 && version.Minor == 3 && version.Build >= 48 ||
             version.Major == 2022 && version.Minor == 3 && version.Build >= 62;

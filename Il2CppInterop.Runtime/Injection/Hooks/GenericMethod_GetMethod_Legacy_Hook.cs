@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Il2CppInterop.Runtime.Injection.Hooks
 {
-    internal unsafe class GenericMethod_GetMethod_Hook : Hook<GenericMethod_GetMethod_Hook.MethodDelegate>
+    internal unsafe class GenericMethod_GetMethod_Legacy_Hook : Hook<GenericMethod_GetMethod_Legacy_Hook.MethodDelegate>
     {
         public override string TargetMethodName => "GenericMethod::GetMethod";
         public override MethodDelegate GetDetour() => Hook;
@@ -79,6 +79,13 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
 
         public override IntPtr FindTargetMethod()
         {
+            return InjectorHelpers.ResolveInjectionTarget(
+                InjectionTarget.GenericMethodGetMethodLegacy,
+                FindTargetMethodFallback);
+        }
+
+        private static IntPtr FindTargetMethodFallback()
+        {
             var genericMethodGetMethod = s_Signatures
                 .Select(s => MemoryUtils.FindSignatureInModule(InjectorHelpers.Il2CppModule, s))
                 .FirstOrDefault(p => p != 0);
@@ -88,7 +95,13 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
                 var getVirtualMethodAPI = InjectorHelpers.GetIl2CppExport(nameof(IL2CPP.il2cpp_object_get_virtual_method));
                 Logger.Instance.LogTrace("il2cpp_object_get_virtual_method: 0x{GetVirtualMethodApiAddress}", getVirtualMethodAPI.ToInt64().ToString("X2"));
 
-                var getVirtualMethod = XrefScannerLowLevel.JumpTargets(getVirtualMethodAPI).Single();
+                var getVirtualMethodTargets = XrefScannerLowLevel
+                    .JumpTargets(getVirtualMethodAPI)
+                    .Take(2)
+                    .ToArray();
+                if (getVirtualMethodTargets.Length != 1)
+                    return IntPtr.Zero;
+                var getVirtualMethod = getVirtualMethodTargets[0];
                 Logger.Instance.LogTrace("Object::GetVirtualMethod: 0x{GetVirtualMethodAddress}", getVirtualMethod.ToInt64().ToString("X2"));
 
                 var getVirtualMethodXrefs = XrefScannerLowLevel.JumpTargets(getVirtualMethod).ToArray();
@@ -96,7 +109,9 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
                 // If the game is built with IL2CPP Master setting, this will return 0 entries, so we do another xref scan with retn instructions ignored.
                 if (getVirtualMethodXrefs.Length == 0)
                 {
-                    genericMethodGetMethod = XrefScannerLowLevel.JumpTargets(getVirtualMethod, true).Last();
+                    genericMethodGetMethod = XrefScannerLowLevel
+                        .JumpTargets(getVirtualMethod, true)
+                        .LastOrDefault();
                 }
                 else
                 {
@@ -114,11 +129,11 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
                             shimXrefs = XrefScannerLowLevel.JumpTargets(shim, true).ToArray();
                         }
 
-                        genericMethodGetMethod = shimXrefs.Take(2).Last();
+                        genericMethodGetMethod = shimXrefs.Take(2).LastOrDefault();
                     }
                     else
                     {
-                        genericMethodGetMethod = getVirtualMethodXrefs.Last();
+                        genericMethodGetMethod = getVirtualMethodXrefs.LastOrDefault();
                     }
                 }
             }

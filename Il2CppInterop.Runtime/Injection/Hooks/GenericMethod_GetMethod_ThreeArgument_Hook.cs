@@ -9,10 +9,9 @@ using Microsoft.Extensions.Logging;
 
 namespace Il2CppInterop.Runtime.Injection.Hooks
 {
-    /// Unity 6 (6000.x.x): the 1-param GetMethod(const Il2CppGenericMethod&amp;) is inlined into
-    /// the 3-param GetMethod(const MethodInfo*, const Il2CppGenericInst*, const Il2CppGenericInst*).
-    /// We use the hook with 3 param correctly
-    internal unsafe class GenericMethod_GetMethod_Unity6_Hook : Hook<GenericMethod_GetMethod_Unity6_Hook.MethodDelegate>
+    /// Newer IL2CPP versions inline the legacy GetMethod(const Il2CppGenericMethod&amp;) into
+    /// GetMethod(const MethodInfo*, const Il2CppGenericInst*, const Il2CppGenericInst*).
+    internal unsafe class GenericMethod_GetMethod_ThreeArgument_Hook : Hook<GenericMethod_GetMethod_ThreeArgument_Hook.MethodDelegate>
     {
         public override string TargetMethodName => "GenericMethod::GetMethod";
         public override MethodDelegate GetDetour() => Hook;
@@ -64,7 +63,7 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
                     var inflatedMethod = methods.Item1.MakeGenericMethod(typeArguments);
                     Logger.Instance.LogTrace("Inflated method: {InflatedMethod}", inflatedMethod.Name);
 
-                    // Use the specific UnityVersionHandler for Unity 6
+                    // Wrap the three-argument method definition using the active Unity layout.
                     var wrappedMethod = UnityVersionHandler.Wrap(methodDefinition);
                     if (wrappedMethod == null) return Original(methodDefinition, classInst, methodInst);
 
@@ -88,7 +87,7 @@ namespace Il2CppInterop.Runtime.Injection.Hooks
         public override IntPtr FindTargetMethod()
         {
             return InjectorHelpers.ResolveInjectionTarget(
-                InjectionTarget.GenericMethodGetMethodUnity6,
+                InjectionTarget.GenericMethodGetMethodThreeArgument,
                 FindTargetMethodFallback);
         }
 

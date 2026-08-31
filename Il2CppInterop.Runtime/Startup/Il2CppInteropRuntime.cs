@@ -17,12 +17,17 @@ public record RuntimeConfiguration
 
 public enum InjectionTarget : uint
 {
+    [Obsolete("Use GenericMethodGetMethodThreeArgument.")]
     GenericMethodGetMethodUnity6 = 1,
+    GenericMethodGetMethodThreeArgument = 1,
     MetadataGetTypeInfoFromTypeDefinitionIndex = 2,
     ClassFromIl2CppType = 3,
     ClassFromName = 4,
     ClassGetDefaultFieldValue = 5,
-    ClassInit = 6
+    ClassInit = 6,
+    [Obsolete("Use GenericMethodGetMethodLegacy.")]
+    GenericMethodGetMethod = 7,
+    GenericMethodGetMethodLegacy = 7
 }
 
 public sealed class Il2CppInteropRuntime : BaseHost
