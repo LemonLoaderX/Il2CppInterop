@@ -1,5 +1,7 @@
 using AsmResolver.DotNet;
+using AsmResolver.DotNet.Code.Cil;
 using AsmResolver.DotNet.Signatures;
+using AsmResolver.PE.DotNet.Cil;
 using AsmResolver.PE.DotNet.Metadata.Tables;
 using Il2CppInterop.Generator;
 using Il2CppInterop.Generator.Contexts;
@@ -106,6 +108,28 @@ var externalDerived = new TypeDefinition(
         .ToTypeDefOrRef());
 unityModule.TopLevelTypes.Add(externalDerived);
 
+var localInitType = new TypeDefinition(
+    "Fixture",
+    "LocalInit",
+    TypeAttributes.Public,
+    unityModule.DefaultImporter.ImportType(typeof(object)));
+var readDefault = new MethodDefinition(
+    "ReadDefault",
+    MethodAttributes.Public | MethodAttributes.Static,
+    MethodSignature.CreateStatic(unityModule.CorLibTypeFactory.Int32))
+{
+    CilMethodBody = new CilMethodBody
+    {
+        InitializeLocals = true
+    }
+};
+var defaultValue = new CilLocalVariable(unityModule.CorLibTypeFactory.Int32);
+readDefault.CilMethodBody.LocalVariables.Add(defaultValue);
+readDefault.CilMethodBody.Instructions.Add(CilOpCodes.Ldloc, defaultValue);
+readDefault.CilMethodBody.Instructions.Add(CilOpCodes.Ret);
+localInitType.Methods.Add(readDefault);
+unityModule.TopLevelTypes.Add(localInitType);
+
 using var gameAssemblies = new AssemblyMetadataAccess(Array.Empty<AssemblyDefinition>());
 using var context = new RewriteGlobalContext(
     new GeneratorOptions(),
@@ -113,6 +137,8 @@ using var context = new RewriteGlobalContext(
     new AssemblyMetadataAccess(new[] { unityAssembly, dependencyAssembly }));
 
 Pass79UnstripTypes.DoPass(context);
+Pass80UnstripMethods.DoPass(context);
+Pass81FillUnstrippedMethodBodies.DoPass(context);
 
 var outputAssembly = context.GetAssemblyByName("UnityLayoutFixture").NewAssembly;
 var outputType = outputAssembly.ManifestModule!.TopLevelTypes
@@ -143,6 +169,13 @@ var outputGenericBaseReference = outputGenericSignature.GetUnderlyingTypeDefOrRe
 Assert(ReferenceEquals(outputGenericBaseReference, outputGenericBase),
     "Unstripping left a same-assembly TypeRef instead of the restored generic TypeDef.");
 
+var outputLocalInit = outputAssembly.ManifestModule.TopLevelTypes
+    .Single(type => type.Name == "LocalInit");
+var outputReadDefault = outputLocalInit.Methods
+    .Single(method => method.Name == "ReadDefault");
+Assert(outputReadDefault.CilMethodBody?.InitializeLocals == true,
+    "Unstripping removed the method flag that zero-initializes local variables.");
+
 var outputDelegate = outputAssembly.ManifestModule.TopLevelTypes
     .Single(type => type.Name == "DelegateContainer")
     .NestedTypes.Single(type => type.Name == "Callback");
@@ -167,7 +200,7 @@ var outputExternalBase = outputDependency.ManifestModule!.TopLevelTypes
 Assert(outputExternalBase.GenericParameters.Count == 1,
     "Unstripping did not restore a generic type referenced by another Unity module.");
 
-Console.WriteLine("Il2CppInterop generator type-preservation tests passed.");
+Console.WriteLine("Il2CppInterop generator unstripping tests passed.");
 
 static void Assert(bool condition, string message)
 {

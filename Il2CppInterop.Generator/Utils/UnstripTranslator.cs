@@ -19,7 +19,10 @@ public static class UnstripTranslator
         if (original.CilMethodBody is null)
             return true;
 
-        target.CilMethodBody = new();
+        target.CilMethodBody = new()
+        {
+            InitializeLocals = original.CilMethodBody.InitializeLocals
+        };
 
         var globalContext = typeRewriteContext.AssemblyContext.GlobalContext;
         Dictionary<CilLocalVariable, CilLocalVariable> localVariableMap = new();
