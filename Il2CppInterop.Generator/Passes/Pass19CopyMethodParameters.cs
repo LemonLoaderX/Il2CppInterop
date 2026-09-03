@@ -23,10 +23,13 @@ public static class Pass19CopyMethodParameters
                             ? $"param_{originalMethodParameter.Sequence}"
                             : originalMethodParameter.Name;
 
+                        var originalDefinition = originalMethodParameter.GetOrCreateDefinition();
                         var newParameter = newMethod.AddParameter(
                             assemblyContext.RewriteTypeRef(originalMethodParameter.ParameterType),
                             newName,
-                            originalMethodParameter.GetOrCreateDefinition().Attributes & ~ParameterAttributes.HasFieldMarshal);
+                            NormalizeParameterAttributes(
+                                originalDefinition.Attributes & ~ParameterAttributes.HasFieldMarshal,
+                                originalDefinition.Constant is not null));
 
                         if (originalMethodParameter.IsParamsArray())
                         {
@@ -46,4 +49,9 @@ public static class Pass19CopyMethodParameters
             }
         }
     }
+
+    internal static ParameterAttributes NormalizeParameterAttributes(
+        ParameterAttributes attributes,
+        bool hasConstant) =>
+        hasConstant ? attributes : attributes & ~ParameterAttributes.HasDefault;
 }

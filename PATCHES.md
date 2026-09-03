@@ -23,9 +23,11 @@ for optional Unity functions.
 ## Generator correctness
 
 Unity unstripping preserves explicit layouts, restored type metadata, and method
-local initialization. Generation consumes the target game assembly when native
-GC write barriers are required. Generator tests must pass before updating the
-bundled CLI or runtime assemblies.
+local initialization. Parameter copying removes an orphaned `HasDefault` flag
+when the input has no Constant row while preserving valid constants and the
+independent `Optional` flag. Generation consumes the target game assembly when
+native GC write barriers are required. Generator tests must pass before updating
+the bundled CLI or runtime assemblies.
 
 Keep future fixes in this repository rather than applying post-build changes to
 Il2CppInterop binaries in a loader or APK tool.

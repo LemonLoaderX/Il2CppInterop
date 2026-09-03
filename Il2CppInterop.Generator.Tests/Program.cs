@@ -136,6 +136,19 @@ using var context = new RewriteGlobalContext(
     gameAssemblies,
     new AssemblyMetadataAccess(new[] { unityAssembly, dependencyAssembly }));
 
+var orphanedDefaultAttributes = Pass19CopyMethodParameters.NormalizeParameterAttributes(
+    ParameterAttributes.Optional | ParameterAttributes.HasDefault,
+    hasConstant: false);
+Assert((orphanedDefaultAttributes & ParameterAttributes.HasDefault) == 0,
+    "Parameter copying retained HasDefault without a Constant row.");
+Assert((orphanedDefaultAttributes & ParameterAttributes.Optional) != 0,
+    "Parameter copying removed the independent Optional flag.");
+var validDefaultAttributes = Pass19CopyMethodParameters.NormalizeParameterAttributes(
+    ParameterAttributes.Optional | ParameterAttributes.HasDefault,
+    hasConstant: true);
+Assert((validDefaultAttributes & ParameterAttributes.HasDefault) != 0,
+    "Parameter copying removed HasDefault from a valid constant.");
+
 Pass79UnstripTypes.DoPass(context);
 Pass80UnstripMethods.DoPass(context);
 Pass81FillUnstrippedMethodBodies.DoPass(context);
