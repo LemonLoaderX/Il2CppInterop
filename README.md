@@ -2,6 +2,10 @@
     <img src="logo/logo_big.svg" width="300">
 </p>
 
+> This maintenance branch adds Android ARM64 runtime and generator fixes over
+> the BepInEx upstream. See [PATCHES.md](PATCHES.md) for the patch stack and its
+> validation contract.
+
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/BepInEx/Il2CppInterop/dotnet.yml)](https://github.com/BepInEx/Il2CppInterop/actions/workflows/dotnet.yml)
 [![GitHub release (latest by date)](https://img.shields.io/github/v/release/BepInEx/Il2CppInterop)](https://github.com/BepInEx/Il2CppInterop/releases)
 
