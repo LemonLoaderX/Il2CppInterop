@@ -33,10 +33,23 @@ namespace Il2CppInterop.Runtime.Injection
                 .Modules.OfType<ProcessModule>()
                 .Single((x) => x.ModuleName is "GameAssembly.dll" or "GameAssembly.so" or "UserAssembly.dll" or "libil2cpp.so");
 
-        internal static IntPtr Il2CppHandle = NativeLibrary.Load(
-            IsAndroidRuntime() ? "libil2cpp.so" : "GameAssembly",
+        private static readonly Lazy<IntPtr> LegacyIl2CppHandle = new(() => NativeLibrary.Load(
+            "GameAssembly",
             typeof(InjectorHelpers).Assembly,
-            null);
+            null));
+
+        internal static IntPtr Il2CppHandle
+        {
+            get
+            {
+                var runtime = Il2CppInteropRuntime.Instance;
+                if (runtime.GameAssemblyHandle != IntPtr.Zero)
+                    return runtime.GameAssemblyHandle;
+                if (runtime.IsAndroid || IsAndroidRuntime())
+                    throw new InvalidOperationException("The host did not supply its initialized IL2CPP library handle.");
+                return LegacyIl2CppHandle.Value;
+            }
+        }
 
         private static bool IsAndroidRuntime() =>
             OperatingSystem.IsAndroid() ||
@@ -135,7 +148,7 @@ namespace Il2CppInterop.Runtime.Injection
         {
             if (!TryGetIl2CppExport(name, out var address))
             {
-                throw new NotSupportedException($"Couldn't find {name} in {Il2CppModule.ModuleName}'s exports");
+                throw new NotSupportedException($"Couldn't find {name} in the selected IL2CPP library's exports");
             }
 
             return address;

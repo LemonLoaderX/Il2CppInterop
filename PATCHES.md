@@ -20,6 +20,14 @@ hook for each native signature. Failed native hooks remain failed instead of
 publishing partial state. Internal-call lookup also exposes a non-throwing path
 for optional Unity functions.
 
+Android hosts must supply `RuntimeConfiguration.GameAssemblyHandle`, borrowed
+from the IL2CPP instance initialized by Unity, and bind P/Invoke to that same
+instance. Injection export lookup reuses the supplied handle and never frees it.
+Reopening `libil2cpp.so` by name can select another linker namespace and crash
+inside an uninitialized runtime. A missing Android handle is rejected; desktop
+hosts retain their legacy lookup when no handle is supplied. Runtime regressions
+verify export lookup through the exact host handle and its ownership contract.
+
 ## Generator correctness
 
 Unity unstripping preserves explicit layouts, restored type metadata, and method

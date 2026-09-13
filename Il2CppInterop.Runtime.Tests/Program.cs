@@ -25,6 +25,7 @@ Assert(Marshal.SizeOf(float5) == 20, "The non-HFA carrier size is incorrect.");
 VerifyResolvedIcall();
 VerifyMissingIcall();
 VerifyHookExceptionReporter();
+VerifyExplicitGameAssemblyHandle();
 VerifyGenericMethodResolvers();
 VerifyArm64ExceptionReturnBuffer();
 VerifyHarmonyTrampolineConversionExceptionReturn();
@@ -106,6 +107,7 @@ static void VerifyGenericMethodResolvers()
         UnityVersion = new Version(2022, 3, 44),
         DetourProvider = new UnusedDetourProvider(),
         IsAndroid = true,
+        GameAssemblyHandle = (IntPtr)0x34567890,
         InjectionTargetResolver = target =>
         {
             requested.Add(target);
@@ -138,6 +140,37 @@ static void VerifyGenericMethodResolvers()
     Assert(Enum.Parse<InjectionTarget>("GenericMethodGetMethod") ==
            InjectionTarget.GenericMethodGetMethodLegacy,
         "The legacy generic-method target name is no longer a compatible alias.");
+}
+
+static void VerifyExplicitGameAssemblyHandle()
+{
+    try
+    {
+        Il2CppInteropRuntime.Create(new RuntimeConfiguration { IsAndroid = true });
+        throw new InvalidOperationException("Android accepted a missing IL2CPP instance.");
+    }
+    catch (ArgumentException) { }
+
+    // A host-owned handle works even when no library named GameAssembly exists.
+    string library = OperatingSystem.IsWindows() ? "kernel32.dll" :
+        OperatingSystem.IsMacOS() ? "/usr/lib/libSystem.B.dylib" : "libc.so.6";
+    string symbol = OperatingSystem.IsWindows() ? "GetCurrentProcessId" : "getpid";
+    IntPtr handle = NativeLibrary.Load(library);
+    try
+    {
+        var runtime = Il2CppInteropRuntime.Create(new RuntimeConfiguration
+        {
+            IsAndroid = true,
+            GameAssemblyHandle = handle,
+            UnityVersion = new Version(6000, 3, 8)
+        });
+        Assert(InjectorHelpers.Il2CppHandle == handle, "Injection did not reuse the host's exact handle.");
+        Assert(InjectorHelpers.TryGetIl2CppExport(symbol, out var address) &&
+            address == NativeLibrary.GetExport(handle, symbol), "Injection exports came from another library.");
+        runtime.Dispose();
+        Assert(NativeLibrary.GetExport(handle, symbol) == address, "Interop freed the host's borrowed handle.");
+    }
+    finally { NativeLibrary.Free(handle); }
 }
 
 static unsafe void VerifyArm64ExceptionReturnBuffer()
