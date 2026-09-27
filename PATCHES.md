@@ -37,5 +37,15 @@ independent `Optional` flag. Generation consumes the target game assembly when
 native GC write barriers are required. Generator tests must pass before updating
 the bundled CLI or runtime assemblies.
 
+Unity 6 managed dependencies embed internal nullable-metadata attributes. The
+unstripping passes intentionally omit constructors and reference-type instance
+fields, so making those attributes public produced empty `NullableAttribute`
+shells that C# selected and then rejected with CS0656. Keep these internal
+compiler helpers out of generated assemblies; the generator regression fixture
+covers this alongside normal Unity type restoration. Run
+`dotnet run --project Il2CppInterop.Generator.Tests/Il2CppInterop.Generator.Tests.csproj --configuration Release`
+before pinning the fork in a Patcher release, then regenerate game Interop rather
+than editing an existing generated DLL.
+
 Keep future fixes in this repository rather than applying post-build changes to
 Il2CppInterop binaries in a loader or APK tool.

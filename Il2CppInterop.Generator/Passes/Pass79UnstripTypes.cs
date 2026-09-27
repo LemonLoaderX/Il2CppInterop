@@ -48,6 +48,12 @@ public static class Pass79UnstripTypes
         if (unityType.Name == "<Module>")
             return;
 
+        // Roslyn embeds these internal metadata helpers in Unity assemblies. An
+        // unstripped public shell has no constructors, so C# binds to it instead
+        // of emitting a usable NullableAttribute for the consuming mod.
+        if (IsEmbeddedNullableMetadata(unityType))
+            return;
+
         if (restoreReferenceOnly && !unityType.IsReferenceType())
             return;
 
@@ -177,12 +183,13 @@ public static class Pass79UnstripTypes
 
                 ProcessType(processedAssembly, unityType, enclosingNewType, imports, ref typesUnstripped, true);
                 var restoredType = processedAssembly.TryGetTypeByName(unityType.FullName)?.NewType;
-                if (restoredType != null)
-                    RedirectReferences(
-                        newModule,
-                        processedAssembly.NewAssembly.Name!,
-                        missingReference,
-                        restoredType);
+                if (restoredType == null)
+                    continue;
+                RedirectReferences(
+                    newModule,
+                    processedAssembly.NewAssembly.Name!,
+                    missingReference,
+                    restoredType);
                 restoredAny = true;
             }
 
@@ -486,5 +493,15 @@ public static class Pass79UnstripTypes
             return typeAttributes | TypeAttributes.Public;
 
         return (typeAttributes & ~TypeAttributes.VisibilityMask) | TypeAttributes.NestedPublic;
+    }
+
+    private static bool IsEmbeddedNullableMetadata(TypeDefinition type)
+    {
+        if (type.Namespace != "System.Runtime.CompilerServices" ||
+            (type.Attributes & TypeAttributes.VisibilityMask) != TypeAttributes.NotPublic)
+            return false;
+
+        return type.Name == "NullableAttribute" || type.Name == "NullableContextAttribute" ||
+            type.Name == "NullablePublicOnlyAttribute";
     }
 }

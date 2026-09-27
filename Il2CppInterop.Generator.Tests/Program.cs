@@ -130,6 +130,22 @@ readDefault.CilMethodBody.Instructions.Add(CilOpCodes.Ret);
 localInitType.Methods.Add(readDefault);
 unityModule.TopLevelTypes.Add(localInitType);
 
+var nullableAttribute = new TypeDefinition(
+    "System.Runtime.CompilerServices",
+    "NullableAttribute",
+    TypeAttributes.NotPublic | TypeAttributes.Sealed,
+    unityModule.DefaultImporter.ImportType(typeof(Attribute)));
+var nullableConstructor = new MethodDefinition(
+    ".ctor",
+    MethodAttributes.Public | MethodAttributes.SpecialName | MethodAttributes.RuntimeSpecialName,
+    MethodSignature.CreateInstance(unityModule.CorLibTypeFactory.Void, unityModule.CorLibTypeFactory.Byte))
+{
+    CilMethodBody = new CilMethodBody()
+};
+nullableConstructor.CilMethodBody.Instructions.Add(CilOpCodes.Ret);
+nullableAttribute.Methods.Add(nullableConstructor);
+unityModule.TopLevelTypes.Add(nullableAttribute);
+
 using var gameAssemblies = new AssemblyMetadataAccess(Array.Empty<AssemblyDefinition>());
 using var context = new RewriteGlobalContext(
     new GeneratorOptions(),
@@ -188,6 +204,14 @@ var outputReadDefault = outputLocalInit.Methods
     .Single(method => method.Name == "ReadDefault");
 Assert(outputReadDefault.CilMethodBody?.InitializeLocals == true,
     "Unstripping removed the method flag that zero-initializes local variables.");
+
+var outputNullableAttribute = outputAssembly.ManifestModule.TopLevelTypes
+    .SingleOrDefault(type => type.FullName == nullableAttribute.FullName);
+Assert(outputNullableAttribute == null ||
+       (outputNullableAttribute.Attributes & TypeAttributes.VisibilityMask) != TypeAttributes.Public ||
+       outputNullableAttribute.Methods.Any(method => method.IsConstructor &&
+           method.Signature?.ParameterTypes.SingleOrDefault()?.FullName == "System.Byte"),
+    "Unstripping exposed a public NullableAttribute without its byte constructor.");
 
 var outputDelegate = outputAssembly.ManifestModule.TopLevelTypes
     .Single(type => type.Name == "DelegateContainer")
