@@ -1,7 +1,7 @@
 # Android ARM64 patch set
 
 This branch extends upstream commit
-`f03c8f4ae507d47ea814f3d11d1ec6b0391c1576`. The patches are loader-neutral and
+`81a6f78c8b653e0da4a3420ac4cd00819e8b6292`. The patches are loader-neutral and
 belong in Il2CppInterop because they implement IL2CPP ABI, injection, and
 generated-assembly behavior.
 
@@ -49,3 +49,9 @@ than editing an existing generated DLL.
 
 Keep future fixes in this repository rather than applying post-build changes to
 Il2CppInterop binaries in a loader or APK tool.
+
+Upstream restores Unity 6.4 type names using the same source-name conversion as
+rewritten types, including compiler-generated nested value types. The fork keeps
+generic/delegate shell restoration and explicit layout metadata while adopting
+that naming rule. Harmony support retains the managed wrapper detour supported
+by the MonoMod 22 API used by its consumers.

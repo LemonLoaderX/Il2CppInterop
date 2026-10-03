@@ -18,6 +18,7 @@ using MonoMod.Utils;
 using Detour = MonoMod.RuntimeDetour.Detour;
 using IDetour = Il2CppInterop.Runtime.Injection.IDetour;
 using ValueType = Il2CppSystem.ValueType;
+using Void = Il2CppSystem.Void;
 
 namespace Il2CppInterop.HarmonySupport;
 
@@ -162,7 +163,6 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
         var detour = new Detour(Original, managedHookedMethod);
         detour.Apply();
         DetourCache.Add(detour);
-
         return managedHookedMethod;
     }
 
@@ -575,8 +575,12 @@ internal unsafe class Il2CppDetourMethodPatcher : MethodPatcher
 
         if (managedParamType.IsByRef)
         {
-            // TODO: directType being ValueType is not handled yet (but it's not that common in games). Implement when needed.
             var directType = managedParamType.GetElementType();
+            // blittable value type pointer, note that ref to boxed Il2CppSystem.ValueType wrapper is still not handled
+            if (directType.IsValueType)
+                return;
+
+            // TODO: directType being Il2CppSystem.ValueType is not handled yet (but it's not that common in games). Implement when needed.
 
             variable = il.DeclareLocal(directType);
 

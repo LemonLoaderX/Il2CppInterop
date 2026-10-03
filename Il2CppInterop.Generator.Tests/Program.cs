@@ -171,8 +171,8 @@ Pass81FillUnstrippedMethodBodies.DoPass(context);
 
 var outputAssembly = context.GetAssemblyByName("UnityLayoutFixture").NewAssembly;
 var outputType = outputAssembly.ManifestModule!.TopLevelTypes
-    .Single(type => type.Name == "<PrivateImplementationDetails>")
-    .NestedTypes.Single(type => type.Name == "__StaticArrayInitTypeSize=6");
+    .Single(type => type.Name == "_PrivateImplementationDetails_")
+    .NestedTypes.Single(type => type.Name == "__StaticArrayInitTypeSize_6");
 
 var outputLayout = outputType.ClassLayout ??
     throw new InvalidOperationException("Unstripping removed the explicit class layout.");
