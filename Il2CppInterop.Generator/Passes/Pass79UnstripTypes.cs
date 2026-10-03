@@ -88,7 +88,7 @@ public static class Pass79UnstripTypes
                 enclosingNewType.NestedTypes.Add(clonedType);
             }
 
-            processedAssembly.RegisterTypeRewrite(new TypeRewriteContext(processedAssembly, null, clonedType));
+            processedAssembly.RegisterTypeRewrite(new TypeRewriteContext(processedAssembly, null, clonedType), unityType.FullName);
 
             return;
         }
@@ -148,7 +148,7 @@ public static class Pass79UnstripTypes
                 clonedType.IsAutoLayout = true;
             }
 
-            processedAssembly.RegisterTypeRewrite(new TypeRewriteContext(processedAssembly, null, clonedType));
+            processedAssembly.RegisterTypeRewrite(new TypeRewriteContext(processedAssembly, null, clonedType), unityType.FullName);
             processedType = clonedType;
         }
 

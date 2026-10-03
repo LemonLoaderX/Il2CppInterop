@@ -55,3 +55,9 @@ rewritten types, including compiler-generated nested value types. The fork keeps
 generic/delegate shell restoration and explicit layout metadata while adopting
 that naming rule. Harmony support retains the managed wrapper detour supported
 by the MonoMod 22 API used by its consumers.
+
+Restored types retain an original Unity full-name lookup alongside the converted
+name. Reference repair and later unstripping passes use that source identity;
+dropping it duplicates renamed shells and leaves references to nonexistent types.
+Regression fixtures serialize and load renamed self, nested and cross-assembly
+references, rather than checking only the presence of the converted definition.

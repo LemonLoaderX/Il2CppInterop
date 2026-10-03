@@ -237,7 +237,80 @@ var outputExternalBase = outputDependency.ManifestModule!.TopLevelTypes
 Assert(outputExternalBase.GenericParameters.Count == 1,
     "Unstripping did not restore a generic type referenced by another Unity module.");
 
+TestRenamedReferences();
 Console.WriteLine("Il2CppInterop generator unstripping tests passed.");
+
+static void TestRenamedReferences()
+{
+    var self = new AssemblyDefinition("RenamedSelfFixture", new Version(1, 0, 0, 0));
+    var module = new ModuleDefinition("RenamedSelfFixture.dll");
+    self.Modules.Add(module);
+    var parent = new TypeDefinition("Fixture", "Parent-Type", TypeAttributes.Public,
+        module.DefaultImporter.ImportType(typeof(object)));
+    module.TopLevelTypes.Add(parent);
+    var nested = new TypeDefinition("", "Nested-Type", TypeAttributes.NestedPublic,
+        module.DefaultImporter.ImportType(typeof(object)));
+    parent.NestedTypes.Add(nested);
+    var readValue = new MethodDefinition("ReadValue", MethodAttributes.Public | MethodAttributes.Static,
+        MethodSignature.CreateStatic(module.CorLibTypeFactory.Int32)) { CilMethodBody = new CilMethodBody() };
+    readValue.CilMethodBody.Instructions.Add(CilOpCodes.Ldc_I4_7);
+    readValue.CilMethodBody.Instructions.Add(CilOpCodes.Ret);
+    parent.Methods.Add(readValue);
+    module.TopLevelTypes.Add(new TypeDefinition("Fixture", "SelfDerived", TypeAttributes.Public,
+        module.DefaultImporter.ImportType(parent)));
+    module.TopLevelTypes.Add(new TypeDefinition("Fixture", "NestedDerived", TypeAttributes.Public,
+        module.DefaultImporter.ImportType(nested)));
+
+    var external = new AssemblyDefinition("RenamedExternalFixture", new Version(1, 0, 0, 0));
+    var externalModule = new ModuleDefinition("RenamedExternalFixture.dll");
+    external.Modules.Add(externalModule);
+    var externalBase = new TypeDefinition("Fixture", "External-Type", TypeAttributes.Public,
+        externalModule.DefaultImporter.ImportType(typeof(object)));
+    externalModule.TopLevelTypes.Add(externalBase);
+    module.TopLevelTypes.Add(new TypeDefinition("Fixture", "ExternalDerived", TypeAttributes.Public,
+        module.DefaultImporter.ImportType(externalBase)));
+
+    using var context = new RewriteGlobalContext(new GeneratorOptions(),
+        new AssemblyMetadataAccess(Array.Empty<AssemblyDefinition>()),
+        new AssemblyMetadataAccess(new[] { self, external }));
+    Pass79UnstripTypes.DoPass(context);
+    Pass80UnstripMethods.DoPass(context);
+    Pass81FillUnstrippedMethodBodies.DoPass(context);
+    var output = context.GetAssemblyByName(self.Name!);
+    Assert(output.TryGetTypeByName(parent.FullName)?.NewType.Name == "Parent_Type",
+        "Renaming lost the original parent type identity.");
+    Assert(output.TryGetTypeByName(nested.FullName)?.NewType.Name == "Nested_Type",
+        "Renaming lost the original nested type identity.");
+    foreach (var assembly in context.Assemblies)
+        Assert(assembly.NewAssembly.ManifestModule!.GetAllTypes().GroupBy(type => type.FullName)
+            .All(group => group.Count() == 1), "Renaming generated duplicate type definitions.");
+
+    var directory = Path.Combine(Path.GetTempPath(), "interop-renamed-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var loadContext = new System.Runtime.Loader.AssemblyLoadContext("renamed-fixture", isCollectible: true);
+    try
+    {
+        foreach (var assembly in context.Assemblies)
+            assembly.NewAssembly.Write(Path.Combine(directory, assembly.NewAssembly.Name + ".dll"));
+        using (var stream = File.OpenRead(Path.Combine(directory, "RenamedExternalFixture.dll")))
+            loadContext.LoadFromStream(stream);
+        using var selfStream = File.OpenRead(Path.Combine(directory, "RenamedSelfFixture.dll"));
+        var loaded = loadContext.LoadFromStream(selfStream);
+        Assert(loaded.GetType("Fixture.SelfDerived", true)!.BaseType!.FullName == "Fixture.Parent_Type",
+            "Self reference still targets the old name.");
+        Assert(loaded.GetType("Fixture.NestedDerived", true)!.BaseType!.FullName == "Fixture.Parent_Type+Nested_Type",
+            "Nested reference still targets the old name.");
+        Assert(loaded.GetType("Fixture.ExternalDerived", true)!.BaseType!.FullName == "Fixture.External_Type",
+            "Cross-assembly reference still targets the old name.");
+        Assert((int)loaded.GetType("Fixture.Parent_Type", true)!.GetMethod("ReadValue")!.Invoke(null, null)! == 7,
+            "Renaming prevented method restoration.");
+    }
+    finally
+    {
+        loadContext.Unload();
+        Directory.Delete(directory, true);
+    }
+}
 
 static void Assert(bool condition, string message)
 {

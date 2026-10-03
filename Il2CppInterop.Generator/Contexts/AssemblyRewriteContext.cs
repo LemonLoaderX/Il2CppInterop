@@ -56,6 +56,12 @@ public class AssemblyRewriteContext
         myNameTypeMap[(context.OriginalType ?? context.NewType).FullName] = context;
     }
 
+    public void RegisterTypeRewrite(TypeRewriteContext context, string originalFullName)
+    {
+        RegisterTypeRewrite(context);
+        myNameTypeMap[originalFullName] = context;
+    }
+
     public IMethodDefOrRef RewriteMethodRef(IMethodDefOrRef methodRef)
     {
         var newType = GlobalContext.GetNewTypeForOriginal(methodRef.DeclaringType!.Resolve()!);
