@@ -82,7 +82,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           draft: true
-          prerelease: ${{ contains(steps.get_version.outputs.build_tag, 'lemon') }}
+          prerelease: ${{ steps.get_version.outputs.build_tag != '' }}
           fail_on_unmatched_files: true
           files: |
             ./bin/zip/*.zip

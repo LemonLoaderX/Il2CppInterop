@@ -7,13 +7,14 @@
 > validation contract.
 
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/LemonLoaderX/Il2CppInterop/dotnet.yml)](https://github.com/LemonLoaderX/Il2CppInterop/actions/workflows/dotnet.yml)
-[![GitHub release](https://img.shields.io/github/v/release/LemonLoaderX/Il2CppInterop?include_prereleases)](https://github.com/LemonLoaderX/Il2CppInterop/releases)
+[![GitHub release](https://img.shields.io/github/v/release/LemonLoaderX/Il2CppInterop)](https://github.com/LemonLoaderX/Il2CppInterop/releases)
 
 ## LemonLoader fork downloads
 
 Download the fork binaries from [GitHub Releases](https://github.com/LemonLoaderX/Il2CppInterop/releases).
-Versions such as `1.5.3-lemon.1` distinguish this fork from upstream packages;
-the NuGet feeds below publish upstream builds, not these Android adaptations.
+The repository and release notes identify these as LemonLoader fork builds.
+Stable versions such as `1.5.3` have no prerelease suffix; the NuGet feeds below
+publish upstream builds, not these Android adaptations.
 
 | Asset | Use |
 | --- | --- |
@@ -32,8 +33,7 @@ an installed Loader. Android host integration must follow the borrowed
 For standalone tool development, use the offline packages with an explicit version:
 
 ```sh
-dotnet nuget add source /absolute/path/to/extracted/packages --name lemon-interop
-dotnet add package Il2CppInterop.Generator --version 1.5.3-lemon.1
+dotnet add package Il2CppInterop.Generator --version 1.5.3 --source /absolute/path/to/extracted/packages
 ```
 
 Release maintenance commands and constraints live in

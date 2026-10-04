@@ -11,6 +11,10 @@ every output directory also includes local test output.
 
 ## Decision
 
+The suffix policy below is superseded by
+[stable release versions](2026-10-04-stable-release-versions.md); the packaging
+and verification contract remains in effect.
+
 The existing workflow and Cake Pack task remain the release entry point. Fork
 tags split an upstream numeric prefix from a lemon suffix. Pack gates the six
 product components on Generator/Runtime regressions and includes their license

@@ -65,11 +65,12 @@ references, rather than checking only the presence of the converted definition.
 ## Release workflow
 
 The original `.github/workflows/dotnet.yml` and Cake Pack task own fork releases.
-Use a version tag `v<upstream-version>-lemon.<revision>`; the numeric prefix stays
-separate from the NuGet suffix. For example:
+Use `v<version>` for stable releases and `v<version>-alpha.N`, `-beta.N` or `-rc.N`
+for test releases. Fork identity belongs in the repository and release notes,
+not a mandatory prerelease suffix. For example:
 
 ```sh
-./build.sh --target=Pack --build_version=1.5.3 --build_tag=lemon.1
+./build.sh --target=Pack --build_version=1.5.3
 ```
 
 Pack builds all existing frameworks, including Generator net472, then runs the
@@ -79,7 +80,8 @@ Only the six product components enter ZIPs; test executables and unrelated outpu
 directories are excluded. ZIPs include LICENSE/PATCHES.md. The NuGet bundle contains
 only packages for the requested fork version. CI adds SHA256SUMS.
 
-Tag builds create a draft GitHub Release. Inspect its asset versions, contents,
+Tag builds create a draft GitHub Release; a nonempty SemVer suffix marks it as
+prerelease. Inspect its asset versions, contents,
 checksums and CLI startup before publishing the draft. Fork CI never pushes to
 the BepInEx or NuGet.org feeds; those original publishing steps are restricted to
 the upstream repository. Existing Loader/Patcher pins are updated independently
