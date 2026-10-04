@@ -218,8 +218,10 @@ public static class Pass79UnstripTypes
             foreach (var sourceAssembly in context.Assemblies.ToArray())
             {
                 var sourceModule = sourceAssembly.NewAssembly.ManifestModule!;
-                foreach (var (targetAssemblyName, unityAssembly) in unityAssemblies)
+                foreach (var entry in unityAssemblies)
                 {
+                    var targetAssemblyName = entry.Key;
+                    var unityAssembly = entry.Value;
                     var targetAssembly = context.TryGetAssemblyByName(targetAssemblyName);
                     if (targetAssembly == null)
                         continue;

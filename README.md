@@ -6,8 +6,38 @@
 > the BepInEx upstream. See [PATCHES.md](PATCHES.md) for the patch stack and its
 > validation contract.
 
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/BepInEx/Il2CppInterop/dotnet.yml)](https://github.com/BepInEx/Il2CppInterop/actions/workflows/dotnet.yml)
-[![GitHub release (latest by date)](https://img.shields.io/github/v/release/BepInEx/Il2CppInterop)](https://github.com/BepInEx/Il2CppInterop/releases)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/LemonLoaderX/Il2CppInterop/dotnet.yml)](https://github.com/LemonLoaderX/Il2CppInterop/actions/workflows/dotnet.yml)
+[![GitHub release](https://img.shields.io/github/v/release/LemonLoaderX/Il2CppInterop?include_prereleases)](https://github.com/LemonLoaderX/Il2CppInterop/releases)
+
+## LemonLoader fork downloads
+
+Download the fork binaries from [GitHub Releases](https://github.com/LemonLoaderX/Il2CppInterop/releases).
+Versions such as `1.5.3-lemon.1` distinguish this fork from upstream packages;
+the NuGet feeds below publish upstream builds, not these Android adaptations.
+
+| Asset | Use |
+| --- | --- |
+| Il2CppInterop.CLI.*.zip | Extract, then run `dotnet net6.0/Il2CppInterop.CLI.dll --help`; requires .NET 6 |
+| Il2CppInterop.Runtime.*.zip | Runtime and dependencies for a host integrating IL2CPP |
+| Il2CppInterop.Generator.*.zip | Generator assemblies for tool integration |
+| Il2CppInterop.Common / HarmonySupport / StructGenerator | Corresponding integration components |
+| Il2CppInterop.NuGet.*.zip | Extract `.nupkg` files into a local NuGet source |
+| SHA256SUMS | SHA-256 checksums for the ZIP assets |
+
+For a Mod, reference the Runtime/Common supplied by its Loader with Copy Local
+disabled. Do not ship a second runtime with the Mod or replace only one DLL in
+an installed Loader. Android host integration must follow the borrowed
+`GameAssemblyHandle` contract in [PATCHES.md](PATCHES.md).
+
+For standalone tool development, use the offline packages with an explicit version:
+
+```sh
+dotnet nuget add source /absolute/path/to/extracted/packages --name lemon-interop
+dotnet add package Il2CppInterop.Generator --version 1.5.3-lemon.1
+```
+
+Release maintenance commands and constraints live in
+[PATCHES.md](PATCHES.md#release-workflow).
 
 |                            | CLI                                                                                                                                                                                                                           | Generator                                                                                                                                                                                                                                       | Runtime                                                                                                                                                                                                                                   | HarmonySupport                                                                                                                                                                                                                                                 |
 |----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

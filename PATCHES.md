@@ -61,3 +61,26 @@ name. Reference repair and later unstripping passes use that source identity;
 dropping it duplicates renamed shells and leaves references to nonexistent types.
 Regression fixtures serialize and load renamed self, nested and cross-assembly
 references, rather than checking only the presence of the converted definition.
+
+## Release workflow
+
+The original `.github/workflows/dotnet.yml` and Cake Pack task own fork releases.
+Use a version tag `v<upstream-version>-lemon.<revision>`; the numeric prefix stays
+separate from the NuGet suffix. For example:
+
+```sh
+./build.sh --target=Pack --build_version=1.5.3 --build_tag=lemon.1
+```
+
+Pack builds all existing frameworks, including Generator net472, then runs the
+Generator and Runtime regression executables. Cross-assembly restoration uses
+KeyValuePair properties because .NET Framework lacks its Deconstruct method.
+Only the six product components enter ZIPs; test executables and unrelated output
+directories are excluded. ZIPs include LICENSE/PATCHES.md. The NuGet bundle contains
+only packages for the requested fork version. CI adds SHA256SUMS.
+
+Tag builds create a draft GitHub Release. Inspect its asset versions, contents,
+checksums and CLI startup before publishing the draft. Fork CI never pushes to
+the BepInEx or NuGet.org feeds; those original publishing steps are restricted to
+the upstream repository. Existing Loader/Patcher pins are updated independently
+after consumer verification, not as a side effect of creating a release.

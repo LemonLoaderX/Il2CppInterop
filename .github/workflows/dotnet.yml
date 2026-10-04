@@ -2,6 +2,9 @@ name: .NET
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     # Prevent running workflow twice on a PR from a non-fork
@@ -9,6 +12,8 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
 
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -17,28 +22,47 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          dotnet-version: |
+            6.0.x
+            8.0.x
 
       - name: Extract Release Version
         id: get_version
         shell: bash
         run: |
-          if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
-            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            release="${GITHUB_REF#refs/tags/v}"
+            if [[ ! "$release" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+              echo "Invalid release version: $release" >&2
+              exit 1
+            fi
+            echo "version=${release%%-*}" >> "$GITHUB_OUTPUT"
+            if [[ "$release" == *-* ]]; then
+              echo "build_tag=${release#*-}" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "build_tag=ci.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build
-        run: ./build.sh --target=Pack --build_version ${{ steps.get_version.outputs.version }} --build_tag ${{ steps.get_version.outputs.build_tag }}
+        env:
+          BUILD_VERSION: ${{ steps.get_version.outputs.version }}
+          BUILD_TAG: ${{ steps.get_version.outputs.build_tag }}
+        run: ./build.sh --target=Pack --build_version="$BUILD_VERSION" --build_tag="$BUILD_TAG"
+
+      - name: Hash release assets
+        run: |
+          cd bin/zip
+          sha256sum *.zip > SHA256SUMS
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          path: ./bin/zip/*.zip
+          path: ./bin/zip/*
           name: Il2CppInterop
 
       - name: Push to NuGet
-        if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+        if: github.repository == 'BepInEx/Il2CppInterop' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
         run: |
           if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
             push_source="https://api.nuget.org/v3/index.json"
@@ -51,8 +75,13 @@ jobs:
 
       - name: Publish a release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
-          files: ./bin/zip/*.zip
+          draft: true
+          prerelease: ${{ contains(steps.get_version.outputs.build_tag, 'lemon') }}
+          fail_on_unmatched_files: true
+          files: |
+            ./bin/zip/*.zip
+            ./bin/zip/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
