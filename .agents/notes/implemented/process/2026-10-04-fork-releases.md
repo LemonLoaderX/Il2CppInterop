@@ -17,6 +17,8 @@ product components on Generator/Runtime regressions and includes their license
 and integration contract. A separate ZIP supplies exact-version offline NuGet
 packages. CI attaches ZIP checksums and creates a draft for final asset inspection.
 Upstream feed publishing is limited to the upstream repository.
+Optional Cake arguments are omitted when empty: its command parser rejects
+`--build_version=` on branch builds and `--build_tag=` on unsuffixed tags.
 
 ## Alternatives considered
 

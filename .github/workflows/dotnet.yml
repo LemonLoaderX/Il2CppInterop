@@ -48,7 +48,11 @@ jobs:
         env:
           BUILD_VERSION: ${{ steps.get_version.outputs.version }}
           BUILD_TAG: ${{ steps.get_version.outputs.build_tag }}
-        run: ./build.sh --target=Pack --build_version="$BUILD_VERSION" --build_tag="$BUILD_TAG"
+        run: |
+          args=(--target=Pack)
+          if [[ -n "$BUILD_VERSION" ]]; then args+=("--build_version=$BUILD_VERSION"); fi
+          if [[ -n "$BUILD_TAG" ]]; then args+=("--build_tag=$BUILD_TAG"); fi
+          ./build.sh "${args[@]}"
 
       - name: Hash release assets
         run: |
