@@ -62,6 +62,13 @@ dropping it duplicates renamed shells and leaves references to nonexistent types
 Regression fixtures serialize and load renamed self, nested and cross-assembly
 references, rather than checking only the presence of the converted definition.
 
+Cross-assembly restoration collects signature references once per unchanged source
+module and groups them by target assembly. It rebuilds that local collection after
+reference repair, preserving restoration order and dependency discovery. Unity
+source types use pass-local full-name lookup tables. These indexes are transient;
+there is no generated-output cache or additional installed metadata. Compare real
+generated assemblies as well as the unstripping fixtures when changing this pass.
+
 ## Release workflow
 
 The original `.github/workflows/dotnet.yml` and Cake Pack task own fork releases.

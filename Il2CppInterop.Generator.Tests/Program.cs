@@ -238,7 +238,70 @@ Assert(outputExternalBase.GenericParameters.Count == 1,
     "Unstripping did not restore a generic type referenced by another Unity module.");
 
 TestRenamedReferences();
+TestCrossAssemblyDependencyChain();
 Console.WriteLine("Il2CppInterop generator unstripping tests passed.");
+
+static void TestCrossAssemblyDependencyChain()
+{
+    var assemblies = new[] { "ChainSource", "ChainLeaf", "ChainMiddle" }
+        .Select(name =>
+        {
+            var assembly = new AssemblyDefinition(name, new Version(1, 0, 0, 0));
+            assembly.Modules.Add(new ModuleDefinition(name + ".dll"));
+            return assembly;
+        }).ToArray();
+    var source = assemblies[0].ManifestModule!;
+    var leafModule = assemblies[1].ManifestModule!;
+    var middleModule = assemblies[2].ManifestModule!;
+    var leaf = new TypeDefinition("Fixture", "Leaf`1", TypeAttributes.Public,
+        leafModule.DefaultImporter.ImportType(typeof(object)));
+    leaf.GenericParameters.Add(new GenericParameter("T"));
+    leafModule.TopLevelTypes.Add(leaf);
+    var middle = new TypeDefinition("Fixture", "Middle`1", TypeAttributes.Public,
+        middleModule.DefaultImporter.ImportType(leaf)
+            .MakeGenericInstanceType(middleModule.CorLibTypeFactory.Int32).ToTypeDefOrRef());
+    middle.GenericParameters.Add(new GenericParameter("T"));
+    middleModule.TopLevelTypes.Add(middle);
+    source.TopLevelTypes.Add(new TypeDefinition("Fixture", "Derived", TypeAttributes.Public,
+        source.DefaultImporter.ImportType(middle)
+            .MakeGenericInstanceType(source.CorLibTypeFactory.String).ToTypeDefOrRef()));
+
+    using var context = new RewriteGlobalContext(new GeneratorOptions(),
+        new AssemblyMetadataAccess(Array.Empty<AssemblyDefinition>()),
+        new AssemblyMetadataAccess(assemblies));
+    Pass79UnstripTypes.DoPass(context);
+    var restoredMiddle = context.GetAssemblyByName("ChainMiddle")
+        .TryGetTypeByName(middle.FullName)?.NewType;
+    var restoredLeaf = context.GetAssemblyByName("ChainLeaf")
+        .TryGetTypeByName(leaf.FullName)?.NewType;
+    Assert(restoredMiddle?.GenericParameters.Count == 1 && restoredLeaf?.GenericParameters.Count == 1,
+        "Cross-assembly restoration missed a dependency introduced by a restored generic type.");
+    var directory = Path.Combine(Path.GetTempPath(), "interop-chain-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(directory);
+    var loadContext = new System.Runtime.Loader.AssemblyLoadContext("chain-fixture", isCollectible: true);
+    try
+    {
+        System.Reflection.Assembly? loadedSource = null;
+        foreach (var name in new[] { "ChainLeaf", "ChainMiddle", "ChainSource" })
+        {
+            var path = Path.Combine(directory, name + ".dll");
+            context.GetAssemblyByName(name).NewAssembly.Write(path);
+            using var stream = File.OpenRead(path);
+            var loaded = loadContext.LoadFromStream(stream);
+            if (name == "ChainSource")
+                loadedSource = loaded;
+        }
+        var baseType = loadedSource!.GetType("Fixture.Derived", true)!.BaseType!;
+        Assert(baseType.GetGenericTypeDefinition().FullName == "Fixture.Middle`1" &&
+               baseType.BaseType!.GetGenericTypeDefinition().FullName == "Fixture.Leaf`1",
+            "The serialized dependency chain does not load with its generated definitions.");
+    }
+    finally
+    {
+        loadContext.Unload();
+        Directory.Delete(directory, true);
+    }
+}
 
 static void TestRenamedReferences()
 {

@@ -207,9 +207,10 @@ public static class Pass79UnstripTypes
     private static void RestoreMissingCrossAssemblyReferences(RewriteGlobalContext context,
         ref int typesUnstripped)
     {
-        var unityAssemblies = context.UnityAssemblies.Assemblies.ToDictionary(
+        var unityTypes = context.UnityAssemblies.Assemblies.ToDictionary(
             assembly => assembly.Name!.ToString(),
-            assembly => assembly,
+            assembly => assembly.ManifestModule!.GetAllTypes()
+                .ToDictionary(type => type.FullName, StringComparer.Ordinal),
             StringComparer.Ordinal);
 
         while (true)
@@ -218,27 +219,28 @@ public static class Pass79UnstripTypes
             foreach (var sourceAssembly in context.Assemblies.ToArray())
             {
                 var sourceModule = sourceAssembly.NewAssembly.ManifestModule!;
-                foreach (var entry in unityAssemblies)
+                Dictionary<string, HashSet<string>>? references = null;
+                foreach (var entry in unityTypes)
                 {
                     var targetAssemblyName = entry.Key;
-                    var unityAssembly = entry.Value;
                     var targetAssembly = context.TryGetAssemblyByName(targetAssemblyName);
                     if (targetAssembly == null)
+                        continue;
+
+                    references ??= CollectTypeReferences(sourceModule);
+                    if (!references.TryGetValue(targetAssemblyName, out var referencedTypes))
                         continue;
 
                     var existingTargetTypes = new HashSet<string>(
                         targetAssembly.NewAssembly.ManifestModule!.GetAllTypes()
                             .Select(type => type.FullName),
                         StringComparer.Ordinal);
-                    var missingReferences = GetMissingSelfReferences(
-                        sourceModule,
-                        targetAssemblyName,
-                        existingTargetTypes);
+                    var missingReferences = referencedTypes
+                        .Where(name => !existingTargetTypes.Contains(name)).ToArray();
                     foreach (var missingReference in missingReferences)
                     {
-                        var unityType = unityAssembly.ManifestModule!.GetAllTypes()
-                            .FirstOrDefault(type => type.FullName == missingReference);
-                        if (unityType == null || !unityType.IsReferenceType())
+                        if (!entry.Value.TryGetValue(missingReference, out var unityType) ||
+                            !unityType.IsReferenceType())
                             continue;
 
                         var enclosingNewType = unityType.DeclaringType == null
@@ -263,6 +265,8 @@ public static class Pass79UnstripTypes
                             targetAssemblyName,
                             missingReference,
                             sourceModule.DefaultImporter.ImportType(restoredType));
+                        // Restoration can add or redirect signatures; the next target needs fresh references.
+                        references = null;
                         restoredAny = true;
                     }
                 }
@@ -383,7 +387,14 @@ public static class Pass79UnstripTypes
     private static string[] GetMissingSelfReferences(ModuleDefinition module, string assemblyName,
         HashSet<string> existingTypes)
     {
-        var missingReferences = new HashSet<string>(StringComparer.Ordinal);
+        return CollectTypeReferences(module).TryGetValue(assemblyName, out var references)
+            ? references.Where(name => !existingTypes.Contains(name)).ToArray()
+            : Array.Empty<string>();
+    }
+
+    private static Dictionary<string, HashSet<string>> CollectTypeReferences(ModuleDefinition module)
+    {
+        var references = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
 
         void AddReference(ITypeDefOrRef? reference)
         {
@@ -393,10 +404,14 @@ public static class Pass79UnstripTypes
                 return;
             }
 
-            if (reference is TypeReference typeReference &&
-                ReferencesAssembly(typeReference, assemblyName) &&
-                !existingTypes.Contains(typeReference.FullName))
-                missingReferences.Add(typeReference.FullName);
+            if (reference is not TypeReference typeReference)
+                return;
+            var assemblyName = GetReferencedAssemblyName(typeReference);
+            if (assemblyName == null)
+                return;
+            if (!references.TryGetValue(assemblyName, out var types))
+                references.Add(assemblyName, types = new HashSet<string>(StringComparer.Ordinal));
+            types.Add(typeReference.FullName);
         }
 
         void AddSignature(TypeSignature? signature)
@@ -443,17 +458,19 @@ public static class Pass79UnstripTypes
                 AddReference(@event.EventType);
         }
 
-        return missingReferences.ToArray();
+        return references;
     }
 
     private static bool ReferencesAssembly(TypeReference type, string assemblyName)
+        => string.Equals(GetReferencedAssemblyName(type), assemblyName, StringComparison.Ordinal);
+
+    private static string? GetReferencedAssemblyName(TypeReference type)
     {
         IResolutionScope? scope = type.Scope;
         while (scope is TypeReference declaringType)
             scope = declaringType.Scope;
 
-        return scope is AssemblyReference assemblyReference &&
-               string.Equals(assemblyReference.Name, assemblyName, StringComparison.Ordinal);
+        return (scope as AssemblyReference)?.Name?.ToString();
     }
 
     private static TypeDefinition CloneEnum(TypeDefinition sourceEnum, Utf8String convertedTypeName, RuntimeAssemblyReferences imports)
