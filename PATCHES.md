@@ -50,6 +50,12 @@ than editing an existing generated DLL.
 Keep future fixes in this repository rather than applying post-build changes to
 Il2CppInterop binaries in a loader or APK tool.
 
+Unity string-binding temporaries use managed `ReadOnlySpan<char>` for AsSpan,
+GetPinnableReference and Length, preserving the original pinned string lifetime.
+They do not become IL2CPP proxy classes. Native Span APIs retain their generated
+proxy signatures; unsupported mixed bodies fail unstripping explicitly. The
+executable regression invokes serialized output through a compacting GC.
+
 Upstream restores Unity 6.4 type names using the same source-name conversion as
 rewritten types, including compiler-generated nested value types. The fork keeps
 generic/delegate shell restoration and explicit layout metadata while adopting

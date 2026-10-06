@@ -19,6 +19,12 @@ public static class UnstripTranslator
         if (original.CilMethodBody is null)
             return true;
 
+        var useManagedStringSpan = original.CilMethodBody.Instructions.Any(instruction =>
+            instruction.Operand is IMethodDescriptor method && StringSpanMarshalling.IsStringAsSpan(method));
+        if (useManagedStringSpan && (StringSpanMarshalling.ContainsSpan(original.Signature!.ReturnType) ||
+            original.Signature.ParameterTypes.Any(StringSpanMarshalling.ContainsSpan)))
+            return false;
+
         target.CilMethodBody = new()
         {
             InitializeLocals = original.CilMethodBody.InitializeLocals
@@ -28,8 +34,12 @@ public static class UnstripTranslator
         Dictionary<CilLocalVariable, CilLocalVariable> localVariableMap = new();
         foreach (var variableDefinition in original.CilMethodBody.LocalVariables)
         {
-            var variableType =
-                Pass80UnstripMethods.ResolveTypeInNewAssemblies(globalContext, variableDefinition.VariableType,
+            if (useManagedStringSpan && StringSpanMarshalling.ContainsSpan(variableDefinition.VariableType) &&
+                !StringSpanMarshalling.IsSpan(variableDefinition.VariableType))
+                return false;
+            var variableType = useManagedStringSpan && StringSpanMarshalling.IsSpan(variableDefinition.VariableType)
+                ? StringSpanMarshalling.GetSpanType(imports.Module)
+                : Pass80UnstripMethods.ResolveTypeInNewAssemblies(globalContext, variableDefinition.VariableType,
                     imports);
             if (variableType == null)
                 return false;
@@ -145,6 +155,9 @@ public static class UnstripTranslator
                 // Static fields are fine, but references to instance fields can't be redirected.
 
                 var fieldArg = (IFieldDescriptor)bodyInstruction.Operand;
+                if (useManagedStringSpan && (StringSpanMarshalling.ContainsSpan(fieldArg.Signature!.FieldType) ||
+                    StringSpanMarshalling.ContainsSpan(fieldArg.DeclaringType?.ToTypeSignature())))
+                    return false;
                 var useSystemCorlibType = fieldArg.Signature?.HasThis ?? true;
                 var fieldDeclarer =
                     Pass80UnstripMethods.ResolveTypeInNewAssembliesRaw(globalContext, fieldArg.DeclaringType!.ToTypeSignature(), imports, useSystemCorlibType);
@@ -203,6 +216,19 @@ public static class UnstripTranslator
                 // Static methods are fine, but references to instance methods can't be redirected.
 
                 var methodArg = (IMethodDescriptor)bodyInstruction.Operand;
+                var spanMethod = useManagedStringSpan ? StringSpanMarshalling.ResolveMethod(methodArg, imports.Module) : null;
+                if (spanMethod != null)
+                {
+                    instructionMap.Add(bodyInstruction, targetBuilder.Add(bodyInstruction.OpCode,
+                        imports.Module.DefaultImporter.ImportMethod(spanMethod)));
+                    continue;
+                }
+                if (useManagedStringSpan && (StringSpanMarshalling.ContainsSpan(methodArg.DeclaringType?.ToTypeSignature()) ||
+                    StringSpanMarshalling.ContainsSpan(methodArg.Signature!.ReturnType) ||
+                    methodArg.Signature.ParameterTypes.Any(StringSpanMarshalling.ContainsSpan) ||
+                    methodArg is MethodSpecification spanGenericMethod &&
+                    spanGenericMethod.Signature!.TypeArguments.Any(StringSpanMarshalling.ContainsSpan)))
+                    return false;
                 var useSystemCorlibType = methodArg.Signature?.HasThis ?? true;
                 var methodDeclarer =
                     Pass80UnstripMethods.ResolveTypeInNewAssemblies(globalContext, methodArg.DeclaringType?.ToTypeSignature(), imports, useSystemCorlibType);
@@ -257,6 +283,8 @@ public static class UnstripTranslator
             }
             else if (bodyInstruction.OpCode.OperandType == CilOperandType.InlineType)
             {
+                if (useManagedStringSpan && StringSpanMarshalling.ContainsSpan(((ITypeDefOrRef)bodyInstruction.Operand).ToTypeSignature()))
+                    return false;
                 var targetType = Pass80UnstripMethods.ResolveTypeInNewAssemblies(globalContext, ((ITypeDefOrRef)bodyInstruction.Operand).ToTypeSignature(), imports);
                 if (targetType == null)
                     return false;
@@ -333,6 +361,8 @@ public static class UnstripTranslator
                 {
                     case ITypeDefOrRef typeDefOrRef:
                         {
+                            if (useManagedStringSpan && StringSpanMarshalling.ContainsSpan(typeDefOrRef.ToTypeSignature()))
+                                return false;
                             var targetTok = Pass80UnstripMethods.ResolveTypeInNewAssemblies(globalContext, typeDefOrRef.ToTypeSignature(), imports);
                             if (targetTok == null)
                                 return false;

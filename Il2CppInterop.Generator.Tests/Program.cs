@@ -239,6 +239,7 @@ Assert(outputExternalBase.GenericParameters.Count == 1,
 
 TestRenamedReferences();
 TestCrossAssemblyDependencyChain();
+StringSpanTests.Run();
 Console.WriteLine("Il2CppInterop generator unstripping tests passed.");
 
 static void TestCrossAssemblyDependencyChain()
