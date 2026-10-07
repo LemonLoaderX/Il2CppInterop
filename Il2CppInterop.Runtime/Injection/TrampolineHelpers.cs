@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using Il2CppInterop.Runtime.InteropTypes;
+using Il2CppInterop.Runtime.Runtime;
 using Il2CppInterop.Runtime.Startup;
 
 namespace Il2CppInterop.Runtime.Injection;
@@ -103,7 +104,13 @@ internal static class TrampolineHelpers
         elementType = typeof(void);
         elementCount = 0;
         var elements = new List<(Type Type, int Offset)>();
-        if (!TryCollectArm64HfaElements(managedType, 0, elements) ||
+        // Non-blittable IL2CPP value types (including generic structs) are CLR
+        // proxy classes. Their CLR fields describe the wrapper, not the native ABI.
+        var collected = managedType.IsSubclassOf(typeof(Il2CppSystem.ValueType))
+            ? TryCollectNativeArm64HfaElements(Il2CppClassPointerStore.GetNativeClassPointer(managedType),
+                0, elements, new HashSet<IntPtr>())
+            : TryCollectArm64HfaElements(managedType, 0, elements);
+        if (!collected ||
             elements.Count is < 1 or > 4)
         {
             return false;
@@ -176,6 +183,51 @@ internal static class TrampolineHelpers
             }
         }
         return true;
+    }
+
+    private static unsafe bool TryCollectNativeArm64HfaElements(
+        IntPtr klass, int baseOffset, ICollection<(Type Type, int Offset)> elements, HashSet<IntPtr> visiting)
+    {
+        if (klass == IntPtr.Zero)
+            throw new ArgumentException("A native value type must have initialized IL2CPP class metadata.");
+        if (!IL2CPP.il2cpp_class_is_valuetype(klass) || IL2CPP.il2cpp_class_is_enum(klass))
+            return false;
+
+        var kind = (Il2CppTypeEnum)IL2CPP.il2cpp_type_get_type(IL2CPP.il2cpp_class_get_type(klass));
+        if (kind is Il2CppTypeEnum.IL2CPP_TYPE_R4 or Il2CppTypeEnum.IL2CPP_TYPE_R8)
+        {
+            elements.Add((kind == Il2CppTypeEnum.IL2CPP_TYPE_R4 ? typeof(float) : typeof(double), baseOffset));
+            return elements.Count <= 4;
+        }
+        if (kind is not (Il2CppTypeEnum.IL2CPP_TYPE_VALUETYPE or Il2CppTypeEnum.IL2CPP_TYPE_GENERICINST) ||
+            !visiting.Add(klass))
+            return false;
+
+        try
+        {
+            var initialCount = elements.Count;
+            var iterator = IntPtr.Zero;
+            IntPtr field;
+            while ((field = IL2CPP.il2cpp_class_get_fields(klass, ref iterator)) != IntPtr.Zero)
+            {
+                if (((FieldAttributes)IL2CPP.il2cpp_field_get_flags(field) & FieldAttributes.Static) != 0)
+                    continue;
+                var fieldType = IL2CPP.il2cpp_field_get_type(field);
+                if (IL2CPP.il2cpp_type_is_byref(fieldType))
+                    return false;
+                // IL2CPP instance field offsets include the boxed object header,
+                // even for nested value types; the ABI carries unboxed storage.
+                var offset = checked((int)IL2CPP.il2cpp_field_get_offset(field) - sizeof(Il2CppObject));
+                if (offset < 0 || !TryCollectNativeArm64HfaElements(IL2CPP.il2cpp_class_from_type(fieldType),
+                        checked(baseOffset + offset), elements, visiting))
+                    return false;
+            }
+            return elements.Count > initialCount;
+        }
+        finally
+        {
+            visiting.Remove(klass);
+        }
     }
 
     internal static Type NativeType(this Type managedType)

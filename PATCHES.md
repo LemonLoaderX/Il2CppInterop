@@ -12,6 +12,28 @@ homogeneous floating-point aggregates and indirect returns. Android-only return
 adapters do not alter desktop targets. Runtime regression tests cover the
 classifications and generated trampoline shapes.
 
+Non-blittable value-type proxies, including closed generic structs, use IL2CPP
+class/field metadata for HFA classification. CLR proxy fields and properties do
+not describe their native layout. Instance offsets exclude the boxed object header;
+static fields are skipped, nested value types are flattened, and mixed types,
+padding, overlaps and aggregates with more than four elements are not HFAs.
+Ordinary generated CLR structs continue to use their actual CLR signature.
+
+Run the isolated native metadata and callback regression with a host C compiler:
+
+```powershell
+pwsh -NoProfile -File Il2CppInterop.Runtime.Tests/test-native-hfa.ps1
+```
+
+For AAPCS64 execution, use the same entry with `-DeviceSerial <native-arm64-device>`,
+`-RuntimeDirectory <flat-android-coreclr-directory>`, `-AndroidNdkRoot <ndk>` and
+`-AndroidSdkRoot <sdk>` from Windows. The runtime directory contains framework DLLs
+and native libraries. The runner builds the fixture from source, uses a unique
+device scratch directory and removes it afterward. Native C invokes generated
+carrier callbacks that transform every float/double element and return by value.
+The metadata shim models IL2CPP exports; this does not replace a real Unity
+generic-struct hook acceptance test.
+
 ## Injection and native hooks
 
 Android resolves `libil2cpp.so` without desktop x86 scanning, supports legacy

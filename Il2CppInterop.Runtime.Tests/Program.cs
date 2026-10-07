@@ -9,6 +9,12 @@ using Il2CppInterop.Runtime.Runtime;
 using Il2CppInterop.Runtime.Startup;
 using MonoMod.Utils;
 
+if (args.Length == 2 && args[0] == "--native-hfa")
+{
+    NativeHfaProbe.Run(args[1]);
+    return;
+}
+
 VerifyHfa<Float2>(8, typeof(float), 2);
 VerifyHfa<Double4>(32, typeof(double), 4);
 VerifyHfa<SequentialFloat3>(12, typeof(float), 3);
